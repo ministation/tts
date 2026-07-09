@@ -1,0 +1,112 @@
+builtin:
+  aidar:
+    name: Айдар
+    sex: Male
+    description: Мужской, нейтральный
+  baya:
+    name: Бая
+    sex: Unsexed
+    description: Унисекс, мягкий
+  kseniya:
+    name: Ксюша
+    sex: Female
+    description: Женский, молодой
+  xenia:
+    name: Ксения
+    sex: Female
+    description: Женский, спокойный
+  eugene:
+    name: Евгений
+    sex: Male
+    description: Мужской, глубокий
+voices:
+  oleg:
+    name: Олег
+    sex: Male
+    fallback: eugene
+    source: builtin
+    description: Офицерский мужской голос
+  zina:
+    name: Зина
+    sex: Female
+    fallback: xenia
+    source: builtin
+    description: Энергичный женский голос
+  garithos:
+    name: Гаритос
+    sex: Male
+    fallback: aidar
+    source: builtin
+    description: Командирский, строгий
+    round_start: false
+  maiev:
+    name: Майев
+    sex: Female
+    fallback: xenia
+    source: builtin
+    description: Холодный женский голос
+    round_start: false
+  myron:
+    name: Майрон
+    sex: Unsexed
+    fallback: baya
+    source: builtin
+    description: Нейтральный, загадочный
+    round_start: false
+  narrator:
+    name: Диктор
+    sex: Male
+    fallback: aidar
+    source: builtin
+    description: Чёткая дикторская речь
+  captain:
+    name: Капитан
+    sex: Male
+    fallback: eugene
+    source: builtin
+    description: Авторитетный командный голос
+  doctor:
+    name: Доктор
+    sex: Female
+    fallback: kseniya
+    source: builtin
+    description: Спокойный медицинский голос
+  bartender:
+    name: Бармен
+    sex: Male
+    fallback: eugene
+    source: builtin
+    description: Дружелюбный, непринуждённый
+  scientist:
+    name: Учёный
+    sex: Unsexed
+    fallback: baya
+    source: builtin
+    description: Взволнованный, быстрый
+  security:
+    name: Охранник
+    sex: Male
+    fallback: aidar
+    source: builtin
+    description: Резкий, деловой
+  clown:
+    name: Клоун
+    sex: Unsexed
+    fallback: baya
+    source: builtin
+    description: Игривый, необычный
+    round_start: false
+  antimage:
+    name: Антимаг
+    sex: Male
+    fallback: eugene
+    source: custom
+    engine: xtts
+    description: Клонирован по образцу (XTTS)
+  ivan:
+    name: Иван
+    sex: Male
+    fallback: eugene
+    source: custom
+    engine: xtts
+    description: Клонирован по образцу (XTTS)

@@ -29,6 +29,18 @@
   speaker: eugene
 
 - type: ttsVoice
+  id: Oleg
+  name: tts-voice-name-oleg
+  sex: Male
+  speaker: oleg
+
+- type: ttsVoice
+  id: Zina
+  name: tts-voice-name-zina
+  sex: Female
+  speaker: zina
+
+- type: ttsVoice
   id: Garithos
   name: tts-voice-name-garithos
   sex: Male
@@ -50,13 +62,44 @@
   roundStart: false
 
 - type: ttsVoice
-  id: Oleg
-  name: tts-voice-name-oleg
+  id: Narrator
+  name: tts-voice-name-narrator
   sex: Male
-  speaker: oleg
+  speaker: narrator
 
 - type: ttsVoice
-  id: Zina
-  name: tts-voice-name-zina
+  id: Captain
+  name: tts-voice-name-captain
+  sex: Male
+  speaker: captain
+
+- type: ttsVoice
+  id: Doctor
+  name: tts-voice-name-doctor
   sex: Female
-  speaker: zina
+  speaker: doctor
+
+- type: ttsVoice
+  id: Bartender
+  name: tts-voice-name-bartender
+  sex: Male
+  speaker: bartender
+
+- type: ttsVoice
+  id: Scientist
+  name: tts-voice-name-scientist
+  sex: Unsexed
+  speaker: scientist
+
+- type: ttsVoice
+  id: Security
+  name: tts-voice-name-security
+  sex: Male
+  speaker: security
+
+- type: ttsVoice
+  id: Clown
+  name: tts-voice-name-clown
+  sex: Unsexed
+  speaker: clown
+  roundStart: false

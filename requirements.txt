@@ -3,4 +3,7 @@ torch
 soundfile
 Flask
 jsonify
+PyYAML
+librosa
+requests
 git+https://github.com/Desklop/StressRNN

@@ -49,6 +49,21 @@ enabled=true
 
 копирнуть в /Resources/Prototypes/Corvax
 
+### Добавление своих голосов
+
+Подробная инструкция: [docs/VOICES.ru.md](docs/VOICES.ru.md)
+
+Кратко:
+```bash
+python tools/voice_manager.py generate --count 10   # сгенерировать кандидатов
+python tools/voice_manager.py preview --file voices/tmp/Voice1.pt
+python tools/voice_manager.py install oleg voices/tmp/Voice1.pt --name "Олег" --sex Male
+python tools/voice_manager.py list                  # список всех голосов
+```
+
+Кастомные модели кладутся в `voices/<id>.pt`, метаданные — в `voices/config.yml`.
+Для Docker смонтируйте volume: `-v /path/to/voices:/workspace/voices`
+
 ### Скрипт быстрого запуска
 
 ```

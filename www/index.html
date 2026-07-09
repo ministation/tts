@@ -138,7 +138,7 @@
 <body>
     <div class="container">
         <h1>SS14 TTS Тестер</h1>
-        <p class="subtitle">Генерация речи для Space Station 14</p>
+        <p class="subtitle">Генерация речи для Space Station 14 · <a href="/train" style="color:#00d9ff">Клонировать голос (XTTS)</a></p>
         
         <label for="text">Текст для озвучки:</label>
         <input type="text" id="textInput" placeholder="Введите текст..." value="Привет, это тестовый голос!">
@@ -172,26 +172,10 @@
     
     <script>
         let availableVoices = [];
-        const audioPlayer = document.getElementById('audio');
+        const audioPlayer = document.getElementById('audioPlayer');
         const statusEl = document.getElementById('status');
         const generateBtn = document.getElementById('generateBtn');
-        
-        // --- Форматирование имени голоса ---
-        function formatVoiceName(voice) {
-            const names = {
-                'aidar': 'Айдар (м)',
-                'baya': 'Бая (ж)',
-                'xenia': 'Ксения (ж)',
-                'kseniya': 'Ксюша (ж)',
-                'eugene': 'Евгений (м)',
-                'pavel': 'Павел (м)',
-                'thorsten': 'Thorsten (м)',
-                'lena': 'Лена (ж)'
-            };
-            return names[voice] || voice;
-        }
-        
-        // --- Показ статуса ---
+
         function showStatus(message, type = 'info') {
             statusEl.textContent = message;
             statusEl.className = `status ${type}`;
@@ -203,7 +187,7 @@
             showStatus('Загрузка списка голосов...', 'info');
             
             try {
-                const res = await fetch('/voices');
+                const res = await fetch('/voices?detailed=1');
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 
                 availableVoices = await res.json();
@@ -211,12 +195,15 @@
                 
                 availableVoices.forEach(voice => {
                     const opt = document.createElement('option');
-                    opt.value = voice;
-                    opt.textContent = formatVoiceName(voice);
+                    opt.value = voice.id;
+                    const sexLabel = voice.sex === 'Male' ? 'м' : voice.sex === 'Female' ? 'ж' : 'у';
+                    const modelMark = voice.engine === 'xtts' ? '◎XTTS' : (voice.uses_custom ? '★' : `→${voice.active_speaker || voice.fallback}`);
+                    opt.textContent = `${voice.name} (${sexLabel}) ${modelMark}`.trim();
                     select.appendChild(opt);
                 });
                 
-                showStatus(`Загружено голосов: ${availableVoices.length}`, 'success');
+                const custom = availableVoices.filter(v => v.uses_custom).length;
+                showStatus(`Загружено голосов: ${availableVoices.length} (custom: ${custom}, остальные — чистые Silero)`, 'success');
             } catch (err) {
                 console.error(err);
                 showStatus('Ошибка загрузки голосов: ' + err.message, 'error');
@@ -261,7 +248,7 @@
                         effect,
                         format: 'ogg',           // Явно указываем
                         sample_rate: 24000,      // Опционально
-                        put_accent: false,
+                        put_accent: true,
                         put_yo: false
                     })
                 });
@@ -322,10 +309,10 @@
         }
         // --- Скачивание аудио ---
         function downloadAudio() {
-            if (!audioPlayer.src || audioPlayer.src.startsWith('blob:')) {
+            if (audioPlayer.src && audioPlayer.src.startsWith('blob:')) {
                 const a = document.createElement('a');
                 a.href = audioPlayer.src;
-                a.download = `tts_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.wav`;
+                a.download = `tts_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.ogg`;
                 a.click();
             } else {
                 showStatus('Сначала сгенерируйте аудио', 'error');

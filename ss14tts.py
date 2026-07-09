@@ -3,7 +3,12 @@ import base64, os, io, sys
 import re
 from stressrnn import StressRNN
 
-from src.SpeakerPatch import SpeakerPatch,SpeakerPatchInit,GetAllSpeakers
+from src.SpeakerPatch import SpeakerPatch, SpeakerPatchInit, GetAllSpeakers
+from src.VoiceRegistry import list_all_voices, has_model, add_voice_to_config, set_voice_source, BUILTIN_SPEAKERS, is_xtts_voice, get_reference_path
+from src.TrainingJobs import create_job, get_job, run_job
+from src.AudioPrep import prepare_reference
+from src.VoiceCloner import clone_voice_from_upload
+from src.CloneClient import health as clone_health, is_available as clone_available
 from src.WarmUp import WarmUp
 from src.SoundEffects import add_echo, add_radio_effect, add_robot
 
@@ -60,14 +65,133 @@ SpeakerPatchInit(model,example_text)
 def index():
     return send_from_directory('www', 'index.html')
 
+
+@app.route('/train')
+def train_page():
+    return send_from_directory('www', 'train.html')
+
+
 @app.route('/<path:path>')
 def static_files(path):
     return send_from_directory('www', path)
 
 @app.route('/voices')
 def api_voices():
-    voices = GetAllSpeakers(speakers)
-    return jsonify(voices)
+    if request.args.get('detailed') == '1':
+        return jsonify(list_all_voices(speakers))
+    return jsonify(GetAllSpeakers(speakers))
+
+
+@app.route('/voices/upload', methods=['POST'])
+def api_upload_voice():
+    req = request.json
+    if not req or req.get('api_token') != ApiToken:
+        abort(403)
+    speaker = req.get('speaker')
+    if not speaker or not re.match(r'^[a-z][a-z0-9_]{0,31}$', speaker):
+        abort(400, description="Invalid speaker id (lowercase latin, digits, underscore)")
+    if speaker in ('random',):
+        abort(400, description="Cannot overwrite reserved speaker")
+    data_b64 = req.get('file')
+    if not data_b64:
+        abort(400, description="Missing file (base64-encoded .pt)")
+    try:
+        data = base64.b64decode(data_b64)
+    except Exception:
+        abort(400, description="Invalid base64 in file field")
+    if len(data) < 100:
+        abort(400, description="File too small to be a valid voice model")
+    voice_path = os.path.join('voices', f'{speaker}.pt')
+    with open(voice_path, 'wb') as f:
+        f.write(data)
+    if req.get('register'):
+        add_voice_to_config(
+            speaker,
+            req.get('name', speaker),
+            req.get('sex', 'Unsexed'),
+            req.get('fallback'),
+            req.get('description', ''),
+            source='custom',
+        )
+    else:
+        try:
+            set_voice_source(speaker, 'custom')
+        except KeyError:
+            pass
+    return jsonify({
+        'ok': True,
+        'speaker': speaker,
+        'has_model': has_model(speaker),
+        'path': voice_path,
+    })
+
+
+@app.route('/voices/train', methods=['POST'])
+def api_train_voice():
+    if request.form.get('api_token') != ApiToken:
+        abort(403)
+    speaker = (request.form.get('speaker') or '').strip().lower()
+    if not speaker or not re.match(r'^[a-z][a-z0-9_]{0,31}$', speaker):
+        abort(400, description="Invalid speaker id")
+    if speaker in BUILTIN_SPEAKERS or speaker == 'random':
+        abort(400, description="Reserved speaker id")
+
+    name = request.form.get('name') or speaker
+    sex = request.form.get('sex', 'Unsexed')
+    if sex not in ('Male', 'Female', 'Unsexed'):
+        abort(400, description="Invalid sex")
+    fallback = request.form.get('fallback')
+    description = request.form.get('description', 'Клонирован по образцу (XTTS)')
+
+    audio = request.files.get('audio')
+    if not audio or not audio.filename:
+        abort(400, description="Missing audio file")
+
+    if not clone_available():
+        abort(503, description="XTTS не установлен. Запустите: powershell -File scripts/setup_clone.ps1")
+
+    import tempfile
+
+    raw = tempfile.NamedTemporaryFile(delete=False, suffix='.upload')
+    try:
+        audio.save(raw.name)
+        raw.close()
+        ref_path = tempfile.mktemp(suffix='.wav')
+        prepare_reference(raw.name, ref_path)
+    finally:
+        if os.path.isfile(raw.name):
+            os.remove(raw.name)
+
+    job_id = create_job()
+
+    def work(progress):
+        try:
+            result = clone_voice_from_upload(
+                speaker, ref_path, name, sex, fallback, description, progress=progress
+            )
+            return result
+        finally:
+            if os.path.isfile(ref_path):
+                os.remove(ref_path)
+
+    run_job(job_id, work)
+    return jsonify({'job_id': job_id, 'engine': 'xtts'})
+
+
+@app.route('/voices/clone/status', methods=['GET'])
+def api_clone_status():
+    return jsonify({
+        'installed': clone_available(),
+        'running': clone_health(),
+    })
+
+
+@app.route('/voices/train/<job_id>', methods=['GET'])
+def api_train_status(job_id):
+    job = get_job(job_id)
+    if not job:
+        abort(404, description="Job not found")
+    return jsonify(job)
 
 # Docker HealthCheck
 @app.route('/health', methods=['GET'])
@@ -102,24 +226,41 @@ def doTTS():
     if 'format' not in req:
         req['format'] = 'ogg'
 
-    speaker, voiceFile = SpeakerPatch(speaker,speakers)
-
-    if 'ssml' in req and req['ssml']:
-        audio = model.apply_tts(ssml_text=patch_ssml(req['text']),
-            speaker=speaker,
-            sample_rate=req['sample_rate'],
-            put_accent=req['put_accent'],
-            put_yo=req['put_yo'],
-            voice_path=voiceFile
-        )
+    if is_xtts_voice(req['speaker']):
+        ref = get_reference_path(req['speaker'])
+        from src.CloneClient import synthesize as clone_synthesize
+        text = patch_text(req['text'])
+        clone_result = clone_synthesize(text, ref, language='ru')
+        wav_bytes = base64.b64decode(clone_result['audio'])
+        audio, clone_sr = sf.read(io.BytesIO(wav_bytes))
+        if clone_sr != req['sample_rate']:
+            import numpy as np
+            duration = len(audio) / clone_sr
+            new_len = int(duration * req['sample_rate'])
+            audio = np.interp(
+                np.linspace(0, len(audio) - 1, new_len),
+                np.arange(len(audio)),
+                audio,
+            )
     else:
-        audio = model.apply_tts(text=patch_text(req['text']),
-            speaker=speaker,
-            sample_rate=req['sample_rate'],
-            put_accent=req['put_accent'],
-            put_yo=req['put_yo'],
-            voice_path=voiceFile
-        )
+        speaker, voiceFile = SpeakerPatch(req['speaker'], speakers)
+
+        if 'ssml' in req and req['ssml']:
+            audio = model.apply_tts(ssml_text=patch_ssml(req['text']),
+                speaker=speaker,
+                sample_rate=req['sample_rate'],
+                put_accent=req['put_accent'],
+                put_yo=req['put_yo'],
+                voice_path=voiceFile
+            )
+        else:
+            audio = model.apply_tts(text=patch_text(req['text']),
+                speaker=speaker,
+                sample_rate=req['sample_rate'],
+                put_accent=req['put_accent'],
+                put_yo=req['put_yo'],
+                voice_path=voiceFile
+            )
     # Saving to bytes buffer
     with io.BytesIO() as buffer_:
         if req["format"] == "ogg":
