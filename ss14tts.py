@@ -4,10 +4,10 @@ import re
 from stressrnn import StressRNN
 
 from src.SpeakerPatch import SpeakerPatch, SpeakerPatchInit, GetAllSpeakers
-from src.VoiceRegistry import list_all_voices, has_model, add_voice_to_config, set_voice_source, BUILTIN_SPEAKERS, is_xtts_voice, get_reference_path
+from src.VoiceRegistry import list_all_voices, has_model, add_voice_to_config, set_voice_source, BUILTIN_SPEAKERS, is_xtts_voice, get_reference_paths, get_voice_model_path
 from src.TrainingJobs import create_job, get_job, run_job
-from src.AudioPrep import prepare_reference
-from src.VoiceCloner import clone_voice_from_upload
+from src.AudioPrep import prepare_references, MAX_REFERENCE_FILES
+from src.VoiceCloner import train_voice_from_upload
 from src.CloneClient import health as clone_health, is_available as clone_available
 from src.WarmUp import WarmUp
 from src.SoundEffects import add_echo, add_radio_effect, add_robot
@@ -46,8 +46,14 @@ example_text = "В недрах тундры выдры в г+етрах т+ыр
 model.to(device)  # gpu or cpu
 
 from flask import Flask, request, jsonify, abort, send_file, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 app = Flask(__name__, static_folder='www')
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(exc):
+    return jsonify({"description": exc.description, "error": exc.name}), exc.code
 
 #import logging
 #log = logging.getLogger('werkzeug')
@@ -129,53 +135,80 @@ def api_upload_voice():
 @app.route('/voices/train', methods=['POST'])
 def api_train_voice():
     if request.form.get('api_token') != ApiToken:
-        abort(403)
+        abort(403, description="Неверный API токен")
     speaker = (request.form.get('speaker') or '').strip().lower()
     if not speaker or not re.match(r'^[a-z][a-z0-9_]{0,31}$', speaker):
-        abort(400, description="Invalid speaker id")
+        abort(400, description="ID голоса: только латиница, цифры и _, начинается с буквы (например: ivan)")
     if speaker in BUILTIN_SPEAKERS or speaker == 'random':
-        abort(400, description="Reserved speaker id")
+        abort(400, description=f"ID «{speaker}» зарезервирован, выберите другое имя")
 
     name = request.form.get('name') or speaker
     sex = request.form.get('sex', 'Unsexed')
     if sex not in ('Male', 'Female', 'Unsexed'):
         abort(400, description="Invalid sex")
     fallback = request.form.get('fallback')
-    description = request.form.get('description', 'Клонирован по образцу (XTTS)')
+    engine = (request.form.get('engine') or 'silero').strip().lower()
+    if engine not in ('silero', 'xtts'):
+        abort(400, description="engine должен быть silero или xtts")
+    description = request.form.get('description') or (
+        'Клонирован по образцу (XTTS)' if engine == 'xtts' else 'Обучен по образцу (Silero)'
+    )
 
-    audio = request.files.get('audio')
-    if not audio or not audio.filename:
-        abort(400, description="Missing audio file")
+    audio_files = []
+    for key in ('audio', 'audio[]'):
+        audio_files.extend(request.files.getlist(key))
+    audio_files = [f for f in audio_files if f and f.filename]
+    if not audio_files:
+        abort(400, description="Не выбраны аудиофайлы. Добавьте 1–5 записей с речью.")
+    if len(audio_files) > MAX_REFERENCE_FILES:
+        abort(400, description=f"Слишком много файлов (максимум {MAX_REFERENCE_FILES})")
 
-    if not clone_available():
+    if engine == 'xtts' and not clone_available():
         abort(503, description="XTTS не установлен. Запустите: powershell -File scripts/setup_clone.ps1")
 
+    import shutil
     import tempfile
 
-    raw = tempfile.NamedTemporaryFile(delete=False, suffix='.upload')
+    refs_dir = tempfile.mkdtemp(prefix="voice_upload_")
+    prepared = []
+    uploads = []
     try:
-        audio.save(raw.name)
-        raw.close()
-        ref_path = tempfile.mktemp(suffix='.wav')
-        prepare_reference(raw.name, ref_path)
+        for audio in audio_files:
+            raw = tempfile.NamedTemporaryFile(delete=False, suffix='.upload')
+            audio.save(raw.name)
+            raw.close()
+            if os.path.getsize(raw.name) < 1024:
+                raise ValueError(f"Файл {audio.filename} слишком маленький или пустой")
+            uploads.append(raw.name)
+        prepared = prepare_references(uploads, refs_dir)
+    except Exception as exc:
+        shutil.rmtree(refs_dir, ignore_errors=True)
+        abort(400, description=f"Ошибка обработки аудио: {exc}")
     finally:
-        if os.path.isfile(raw.name):
-            os.remove(raw.name)
+        for path in uploads:
+            if os.path.isfile(path):
+                os.remove(path)
 
     job_id = create_job()
 
     def work(progress):
         try:
-            result = clone_voice_from_upload(
-                speaker, ref_path, name, sex, fallback, description, progress=progress
+            return train_voice_from_upload(
+                model,
+                speaker,
+                prepared,
+                name,
+                sex,
+                fallback,
+                description,
+                engine=engine,
+                progress=progress,
             )
-            return result
         finally:
-            if os.path.isfile(ref_path):
-                os.remove(ref_path)
+            shutil.rmtree(refs_dir, ignore_errors=True)
 
     run_job(job_id, work)
-    return jsonify({'job_id': job_id, 'engine': 'xtts'})
+    return jsonify({'job_id': job_id, 'engine': engine, 'references': len(prepared)})
 
 
 @app.route('/voices/clone/status', methods=['GET'])
@@ -227,10 +260,20 @@ def doTTS():
         req['format'] = 'ogg'
 
     if is_xtts_voice(req['speaker']):
-        ref = get_reference_path(req['speaker'])
-        from src.CloneClient import synthesize as clone_synthesize
+        voice_model = get_voice_model_path(req['speaker'])
+        refs = get_reference_paths(req['speaker'])
+        from src.CloneClient import synthesize as clone_synthesize, encode_voice
         text = patch_text(req['text'])
-        clone_result = clone_synthesize(text, ref, language='ru')
+        if not os.path.isfile(voice_model):
+            if not refs:
+                abort(404, description=f"Voice model not found: {req['speaker']}.pt")
+            encode_voice(refs, voice_model, speaker_id=req['speaker'])
+        clone_result = clone_synthesize(
+            text,
+            voice_model_path=voice_model,
+            speaker_id=req['speaker'],
+            reference_paths=refs or None,
+        )
         wav_bytes = base64.b64decode(clone_result['audio'])
         audio, clone_sr = sf.read(io.BytesIO(wav_bytes))
         if clone_sr != req['sample_rate']:

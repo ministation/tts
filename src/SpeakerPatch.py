@@ -1,7 +1,7 @@
 import os
 import glob
 
-from src.VoiceRegistry import get_fallback, load_config, uses_custom_model
+from src.VoiceRegistry import get_fallback, load_config, uses_custom_model, get_engine
 
 cwd = os.getcwd()
 
@@ -42,7 +42,7 @@ def GetAllSpeakers(speakers):
 
 def SpeakerPatch(speaker, speakers):
     voiceFile = dynVoices + "/" + speaker + ".pt"
-    if uses_custom_model(speaker) and os.path.exists(voiceFile):
+    if uses_custom_model(speaker) and get_engine(speaker) == "silero" and os.path.exists(voiceFile):
         return "random", voiceFile
 
     registry_fb = _registry_fallback(speaker)

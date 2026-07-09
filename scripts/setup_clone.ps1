@@ -14,7 +14,7 @@ if (Test-Path clone_venv) { Remove-Item -Recurse -Force clone_venv }
 & $py311 -m venv clone_venv
 
 $pip = Join-Path $Root "clone_venv\Scripts\pip.exe"
-& $pip install torch torchaudio "transformers>=4.46,<5" "coqui-tts[codec]" flask requests
+& $pip install torch torchaudio "transformers>=4.46,<5" "coqui-tts[codec]" flask requests soundfile
 
 Write-Host ""
 Write-Host "Готово! XTTS в clone_venv/"

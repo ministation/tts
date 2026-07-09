@@ -41,19 +41,63 @@ def get_reference_path(speaker_id, voices_dir=None):
     return os.path.join(voices_dir, speaker_id, "reference.wav")
 
 
-def has_silero_model(speaker_id, voices_dir=None):
+def get_references_dir(speaker_id, voices_dir=None):
     voices_dir = voices_dir or _voices_dir()
-    return os.path.isfile(os.path.join(voices_dir, f"{speaker_id}.pt"))
+    return os.path.join(voices_dir, speaker_id, "references")
+
+
+def get_reference_paths(speaker_id, voices_dir=None):
+    refs_dir = get_references_dir(speaker_id, voices_dir)
+    if os.path.isdir(refs_dir):
+        paths = sorted(glob.glob(os.path.join(refs_dir, "*.wav")))
+        if paths:
+            return paths
+    primary = get_reference_path(speaker_id, voices_dir)
+    if os.path.isfile(primary):
+        return [primary]
+    return []
+
+
+def get_voice_model_path(speaker_id, voices_dir=None):
+    voices_dir = voices_dir or _voices_dir()
+    return os.path.join(voices_dir, f"{speaker_id}.pt")
+
+
+def migrate_legacy_voice_pt(speaker_id, voices_dir=None):
+    voices_dir = voices_dir or _voices_dir()
+    legacy = os.path.join(voices_dir, speaker_id, "voice.pt")
+    target = get_voice_model_path(speaker_id, voices_dir)
+    if os.path.isfile(legacy) and not os.path.isfile(target):
+        shutil.move(legacy, target)
+    return target if os.path.isfile(target) else None
+
+
+def has_silero_model(speaker_id, voices_dir=None):
+    entry = get_voice_config(speaker_id)
+    if entry and entry.get("engine") == "xtts":
+        return False
+    return os.path.isfile(get_voice_model_path(speaker_id, voices_dir))
 
 
 def has_clone_reference(speaker_id, voices_dir=None):
-    return os.path.isfile(get_reference_path(speaker_id, voices_dir))
+    return bool(get_reference_paths(speaker_id, voices_dir))
+
+
+def has_xtts_model(speaker_id, voices_dir=None):
+    migrate_legacy_voice_pt(speaker_id, voices_dir)
+    path = get_voice_model_path(speaker_id, voices_dir)
+    if not os.path.isfile(path):
+        return False
+    entry = get_voice_config(speaker_id)
+    if entry:
+        return entry.get("engine") == "xtts"
+    return False
 
 
 def has_model(speaker_id, voices_dir=None):
     entry = get_voice_config(speaker_id)
     if entry and entry.get("engine") == "xtts":
-        return has_clone_reference(speaker_id, voices_dir)
+        return has_xtts_model(speaker_id, voices_dir) or has_clone_reference(speaker_id, voices_dir)
     return has_silero_model(speaker_id, voices_dir) or has_clone_reference(speaker_id, voices_dir)
 
 
@@ -79,13 +123,15 @@ def uses_custom_model(speaker_id, config=None):
         return False
     engine = entry.get("engine", "silero")
     if engine == "xtts":
-        return has_clone_reference(speaker_id)
+        return has_xtts_model(speaker_id) or has_clone_reference(speaker_id)
     return has_silero_model(speaker_id)
 
 
 def is_xtts_voice(speaker_id, config=None):
     entry = get_voice_config(speaker_id, config)
-    return entry and entry.get("engine") == "xtts" and entry.get("source") == "custom" and has_clone_reference(speaker_id)
+    if not entry or entry.get("engine") != "xtts":
+        return False
+    return has_xtts_model(speaker_id) or has_clone_reference(speaker_id)
 
 
 def get_fallback(speaker_id, config=None):
@@ -164,18 +210,20 @@ def list_all_voices(model_speakers, include_random=False):
         speaker_id = os.path.basename(pt_path).replace(".pt", "")
         if speaker_id not in seen:
             seen.add(speaker_id)
+            entry = get_voice_config(speaker_id, config)
+            engine = entry.get("engine", "silero") if entry else "silero"
             result.append({
                 "id": speaker_id,
-                "name": speaker_id,
-                "sex": "Unsexed",
-                "description": "Silero .pt",
+                "name": entry.get("name", speaker_id) if entry else speaker_id,
+                "sex": entry.get("sex", "Unsexed") if entry else "Unsexed",
+                "description": entry.get("description", f"{engine} .pt") if entry else f"{engine} .pt",
                 "builtin": False,
                 "has_model": True,
                 "uses_custom": True,
-                "source": "custom",
-                "engine": "silero",
-                "active_speaker": "random",
-                "fallback": None,
+                "source": entry.get("source", "custom") if entry else "custom",
+                "engine": engine,
+                "active_speaker": "xtts-clone" if engine == "xtts" else "random",
+                "fallback": entry.get("fallback") if entry else None,
             })
 
     if include_random and "random" in model_speakers:
@@ -211,16 +259,57 @@ def set_voice_source(speaker_id, source):
     save_config(config)
 
 
-def install_clone_voice(speaker_id, reference_path, name, sex="Unsexed", fallback=None, description=""):
+def install_clone_voice(
+    speaker_id,
+    reference_paths,
+    name,
+    sex="Unsexed",
+    fallback=None,
+    description="",
+    engine="silero",
+):
+    if isinstance(reference_paths, str):
+        reference_paths = [reference_paths]
+    if not reference_paths:
+        raise ValueError("At least one reference audio required")
+
     profile_dir = os.path.join(_voices_dir(), speaker_id)
-    os.makedirs(profile_dir, exist_ok=True)
+    refs_dir = get_references_dir(speaker_id)
+    if os.path.isdir(refs_dir):
+        shutil.rmtree(refs_dir)
+    os.makedirs(refs_dir, exist_ok=True)
+
+    saved_refs = []
+    for idx, src in enumerate(reference_paths, 1):
+        dst = os.path.join(refs_dir, f"{idx:03d}.wav")
+        shutil.copy2(src, dst)
+        saved_refs.append(dst)
+
     ref_dst = get_reference_path(speaker_id)
-    shutil.copy2(reference_path, ref_dst)
-    old_pt = os.path.join(_voices_dir(), f"{speaker_id}.pt")
-    if os.path.isfile(old_pt):
-        os.remove(old_pt)
-    add_voice_to_config(speaker_id, name, sex, fallback, description, source="custom", engine="xtts")
-    return {"reference": ref_dst, "profile_dir": profile_dir}
+    os.makedirs(profile_dir, exist_ok=True)
+    shutil.copy2(saved_refs[0], ref_dst)
+
+    voice_model = get_voice_model_path(speaker_id)
+    migrate_legacy_voice_pt(speaker_id)
+    if engine not in ENGINES:
+        raise ValueError(f"engine must be one of {ENGINES}")
+    add_voice_to_config(
+        speaker_id,
+        name,
+        sex,
+        fallback,
+        description or (
+            "Клонирован по образцу (XTTS)" if engine == "xtts" else "Обучен по образцу (Silero)"
+        ),
+        source="custom",
+        engine=engine,
+    )
+    return {
+        "reference": ref_dst,
+        "references": saved_refs,
+        "voice_model": voice_model,
+        "profile_dir": profile_dir,
+    }
 
 
 def add_voice_to_config(speaker_id, name, sex="Unsexed", fallback=None, description="", source="builtin", engine="silero"):

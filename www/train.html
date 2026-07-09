@@ -1,190 +1,226 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SS14 TTS — Клонирование голоса</title>
-    <style>
-        :root { --card: #1e293b; --accent: #00d9ff; --text: #e2e8f0; }
-        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #0f172a; color: var(--text); padding: 20px; }
-        .container { max-width: 760px; margin: 30px auto; background: var(--card); padding: 32px; border-radius: 16px; border: 1px solid #334155; }
-        h1 { color: var(--accent); margin-top: 0; }
-        .subtitle { color: #94a3b8; line-height: 1.5; }
-        label { display: block; margin: 14px 0 6px; font-weight: 600; }
-        input, select, button, textarea { width: 100%; padding: 12px; border: none; border-radius: 10px; font-size: 15px; }
-        input, select, textarea { background: #334155; color: white; }
-        button { background: var(--accent); color: #0f172a; font-weight: bold; cursor: pointer; margin-top: 16px; }
-        button:disabled { background: #64748b; cursor: not-allowed; }
-        .hint { color: #94a3b8; font-size: 0.9rem; margin-top: 4px; }
-        .status { margin-top: 16px; padding: 12px; border-radius: 8px; text-align: center; }
-        .status.info { background: #172554; color: #93c5fd; }
-        .status.success { background: #064e3b; color: #6ee7b7; }
-        .status.error { background: #450a0a; color: #fca5a5; }
-        .progress { height: 10px; background: #334155; border-radius: 999px; overflow: hidden; margin-top: 12px; }
-        .progress > div { height: 100%; width: 0%; background: var(--accent); transition: width 0.3s; }
-        audio { width: 100%; margin-top: 16px; }
-        a { color: var(--accent); }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <p><a href="/">← Назад к тестеру</a></p>
-        <h1>Клонирование голоса (XTTS v2)</h1>
-        <p class="subtitle">
-            Загрузите <strong>10–30 секунд</strong> чистой речи одного человека (WAV/MP3).
-            Система создаст <strong>новый голосовой профиль</strong> и будет синтезировать речь в этом тембре.
-            <br><br>
-            Первый запуск скачает модель XTTS (~2 ГБ). На CPU генерация медленнее, на GPU быстрее.
-        </p>
-        <div id="xttsStatus" class="status info">Проверка XTTS...</div>
-
-        <label for="speaker">ID голоса</label>
-        <input id="speaker" placeholder="ivan" value="ivan">
-
-        <label for="name">Имя</label>
-        <input id="name" placeholder="Иван" value="Иван">
-
-        <label for="sex">Пол (для игры)</label>
-        <select id="sex">
-            <option value="Male">Мужской</option>
-            <option value="Female">Женский</option>
-            <option value="Unsexed">Унисекс</option>
-        </select>
-
-        <label for="fallback">Запасной Silero-голос</label>
-        <select id="fallback">
-            <option value="eugene">eugene (м)</option>
-            <option value="aidar">aidar (м)</option>
-            <option value="xenia">xenia (ж)</option>
-            <option value="kseniya">kseniya (ж)</option>
-            <option value="baya">baya (у)</option>
-        </select>
-
-        <label for="audio">Аудио-образец</label>
-        <input id="audio" type="file" accept="audio/*">
-
-        <label for="apiToken">API токен</label>
-        <input id="apiToken" value="test">
-
-        <label for="previewText">Текст для проверки</label>
-        <textarea id="previewText" rows="2">Привет, это мой клонированный голос.</textarea>
-
-        <button id="trainBtn" onclick="startTraining()">Создать голос</button>
-        <div class="progress"><div id="progressBar"></div></div>
-        <div id="status" class="status info">Готов</div>
-        <audio id="previewPlayer" controls style="display:none;"></audio>
-    </div>
-    <script>
-        const statusEl = document.getElementById('status');
-        const xttsStatus = document.getElementById('xttsStatus');
-        const progressBar = document.getElementById('progressBar');
-        const trainBtn = document.getElementById('trainBtn');
-        const previewPlayer = document.getElementById('previewPlayer');
-        let pollTimer = null;
-
-        async function checkXtts() {
-            try {
-                const res = await fetch('/voices/clone/status');
-                const data = await res.json();
-                if (!data.installed) {
-                    xttsStatus.textContent = 'XTTS не установлен. В PowerShell: powershell -File scripts/setup_clone.ps1';
-                    xttsStatus.className = 'status error';
-                    trainBtn.disabled = true;
-                } else if (!data.running) {
-                    xttsStatus.textContent = 'XTTS установлен. Worker запустится автоматически при создании голоса.';
-                    xttsStatus.className = 'status info';
-                } else {
-                    xttsStatus.textContent = 'XTTS готов к работе';
-                    xttsStatus.className = 'status success';
-                }
-            } catch (e) {
-                xttsStatus.textContent = 'Не удалось проверить XTTS';
-                xttsStatus.className = 'status error';
-            }
-        }
-        checkXtts();
-
-        function setStatus(text, type = 'info') {
-            statusEl.textContent = text;
-            statusEl.className = `status ${type}`;
-        }
-
-        async function startTraining() {
-            const speaker = document.getElementById('speaker').value.trim().toLowerCase();
-            const audioFile = document.getElementById('audio').files[0];
-            if (!speaker) return setStatus('Укажите ID', 'error');
-            if (!audioFile) return setStatus('Выберите аудио', 'error');
-
-            const form = new FormData();
-            form.append('speaker', speaker);
-            form.append('name', document.getElementById('name').value || speaker);
-            form.append('sex', document.getElementById('sex').value);
-            form.append('fallback', document.getElementById('fallback').value);
-            form.append('api_token', document.getElementById('apiToken').value);
-            form.append('audio', audioFile);
-
-            trainBtn.disabled = true;
-            setProgress(0);
-            setStatus('Загрузка образца... (первый раз может занять несколько минут — скачивание XTTS)', 'info');
-
-            try {
-                const res = await fetch('/voices/train', { method: 'POST', body: form });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(data.description || `HTTP ${res.status}`);
-                pollJob(data.job_id, speaker);
-            } catch (e) {
-                setStatus('Ошибка: ' + e.message, 'error');
-                trainBtn.disabled = false;
-            }
-        }
-
-        function setProgress(v) { progressBar.style.width = `${v}%`; }
-
-        function pollJob(jobId, speaker) {
-            if (pollTimer) clearInterval(pollTimer);
-            pollTimer = setInterval(async () => {
-                const res = await fetch(`/voices/train/${jobId}`);
-                const job = await res.json();
-                setProgress(job.progress || 0);
-                setStatus(job.message || job.status, job.status === 'error' ? 'error' : 'info');
-                if (job.status === 'done') {
-                    clearInterval(pollTimer);
-                    trainBtn.disabled = false;
-                    setStatus(`Голос «${job.result.name}» создан (XTTS)`, 'success');
-                    await previewVoice(speaker);
-                    checkXtts();
-                } else if (job.status === 'error') {
-                    clearInterval(pollTimer);
-                    trainBtn.disabled = false;
-                }
-            }, 2000);
-        }
-
-        async function previewVoice(speaker) {
-            const res = await fetch('/tts', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    text: document.getElementById('previewText').value,
-                    speaker,
-                    api_token: document.getElementById('apiToken').value,
-                    format: 'ogg',
-                    sample_rate: 24000,
-                }),
-            });
-            const json = await res.json();
-            const blob = new Blob([Uint8Array.from(atob(json.results[0].audio), c => c.charCodeAt(0))], { type: 'audio/ogg' });
-            previewPlayer.src = URL.createObjectURL(blob);
-            previewPlayer.style.display = 'block';
-            previewPlayer.play().catch(() => {});
-        }
-
-        document.getElementById('sex').addEventListener('change', (e) => {
-            const fb = document.getElementById('fallback');
-            if (e.target.value === 'Male') fb.value = 'eugene';
-            else if (e.target.value === 'Female') fb.value = 'xenia';
-            else fb.value = 'baya';
-        });
-    </script>
-</body>
-</html>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SS14 TTS — Обучение голоса</title>
+    <style>
+        :root { --card: #1e293b; --accent: #00d9ff; --text: #e2e8f0; }
+        body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #0f172a; color: var(--text); padding: 20px; }
+        .container { max-width: 760px; margin: 30px auto; background: var(--card); padding: 32px; border-radius: 16px; border: 1px solid #334155; }
+        h1 { color: var(--accent); margin-top: 0; }
+        .subtitle { color: #94a3b8; line-height: 1.5; }
+        label { display: block; margin: 14px 0 6px; font-weight: 600; }
+        input, select, button, textarea { width: 100%; padding: 12px; border: none; border-radius: 10px; font-size: 15px; }
+        input, select, textarea { background: #334155; color: white; }
+        button { background: var(--accent); color: #0f172a; font-weight: bold; cursor: pointer; margin-top: 16px; }
+        button:disabled { background: #64748b; cursor: not-allowed; }
+        .hint { color: #94a3b8; font-size: 0.9rem; margin-top: 4px; }
+        .status { margin-top: 16px; padding: 12px; border-radius: 8px; text-align: center; }
+        .status.info { background: #172554; color: #93c5fd; }
+        .status.success { background: #064e3b; color: #6ee7b7; }
+        .status.error { background: #450a0a; color: #fca5a5; }
+        .progress { height: 10px; background: #334155; border-radius: 999px; overflow: hidden; margin-top: 12px; }
+        .progress > div { height: 100%; width: 0%; background: var(--accent); transition: width 0.3s; }
+        audio { width: 100%; margin-top: 16px; }
+        a { color: var(--accent); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <p><a href="/">← Назад к тестеру</a></p>
+        <h1>Обучение голоса по образцу</h1>
+        <p class="subtitle">
+            Загрузите <strong>1–5 файлов</strong> с чистой речью одного человека (по 10–30 сек, WAV/MP3).
+            <br><br>
+            <strong>Silero (рекомендуется)</strong> — лёгкая модель <code>voices/id.pt</code>, синтез как у встроенных голосов (быстро).
+            <br>
+            <strong>XTTS</strong> — максимальное сходство с образцом, но медленно и нужен отдельный worker.
+        </p>
+        <div id="engineStatus" class="status info">Режим: Silero — worker не нужен</div>
+
+        <label for="engine">Движок</label>
+        <select id="engine">
+            <option value="silero" selected>Silero — быстрый, лёгкий .pt</option>
+            <option value="xtts">XTTS — точнее, медленный</option>
+        </select>
+
+        <label for="speaker">ID голоса</label>
+        <input id="speaker" placeholder="ivan" value="ivan">
+
+        <label for="name">Имя</label>
+        <input id="name" placeholder="Иван" value="Иван">
+
+        <label for="sex">Пол (для игры)</label>
+        <select id="sex">
+            <option value="Male">Мужской</option>
+            <option value="Female">Женский</option>
+            <option value="Unsexed">Унисекс</option>
+        </select>
+
+        <label for="fallback">Запасной Silero-голос</label>
+        <select id="fallback">
+            <option value="eugene">eugene (м)</option>
+            <option value="aidar">aidar (м)</option>
+            <option value="xenia">xenia (ж)</option>
+            <option value="kseniya">kseniya (ж)</option>
+            <option value="baya">baya (у)</option>
+        </select>
+
+        <label for="audio">Аудио-образцы (можно несколько)</label>
+        <input id="audio" type="file" accept="audio/*" multiple>
+        <p class="hint" id="audioHint">До 5 файлов. Разные фразы, один тембр.</p>
+
+        <label for="apiToken">API токен</label>
+        <input id="apiToken" value="test">
+
+        <label for="previewText">Текст для проверки</label>
+        <textarea id="previewText" rows="2">Привет, это мой обученный голос.</textarea>
+
+        <button id="trainBtn" onclick="startTraining()">Создать голос</button>
+        <div class="progress"><div id="progressBar"></div></div>
+        <div id="status" class="status info">Готов</div>
+        <audio id="previewPlayer" controls style="display:none;"></audio>
+    </div>
+    <script>
+        const statusEl = document.getElementById('status');
+        const engineStatus = document.getElementById('engineStatus');
+        const progressBar = document.getElementById('progressBar');
+        const trainBtn = document.getElementById('trainBtn');
+        const previewPlayer = document.getElementById('previewPlayer');
+        const engineSelect = document.getElementById('engine');
+        let pollTimer = null;
+
+        async function updateEngineStatus() {
+            const engine = engineSelect.value;
+            if (engine === 'silero') {
+                engineStatus.textContent = 'Режим Silero: быстрый синтез, лёгкая модель voices/id.pt';
+                engineStatus.className = 'status success';
+                trainBtn.disabled = false;
+                return;
+            }
+            try {
+                const res = await fetch('/voices/clone/status');
+                const data = await res.json();
+                if (!data.installed) {
+                    engineStatus.textContent = 'XTTS не установлен: powershell -File scripts/setup_clone.ps1';
+                    engineStatus.className = 'status error';
+                    trainBtn.disabled = true;
+                } else if (!data.running) {
+                    engineStatus.textContent = 'XTTS: запустите clone_venv\\Scripts\\python.exe clone_worker.py';
+                    engineStatus.className = 'status info';
+                    trainBtn.disabled = false;
+                } else {
+                    engineStatus.textContent = 'XTTS worker готов';
+                    engineStatus.className = 'status success';
+                    trainBtn.disabled = false;
+                }
+            } catch (e) {
+                engineStatus.textContent = 'Не удалось проверить XTTS';
+                engineStatus.className = 'status error';
+            }
+        }
+        engineSelect.addEventListener('change', updateEngineStatus);
+        updateEngineStatus();
+
+        document.getElementById('audio').addEventListener('change', (e) => {
+            const n = e.target.files.length;
+            document.getElementById('audioHint').textContent = n
+                ? `Выбрано файлов: ${n}`
+                : 'До 5 файлов. Разные фразы, один тембр.';
+        });
+
+        function setStatus(text, type = 'info') {
+            statusEl.textContent = text;
+            statusEl.className = `status ${type}`;
+        }
+
+        async function startTraining() {
+            const speaker = document.getElementById('speaker').value.trim().toLowerCase();
+            const audioFiles = Array.from(document.getElementById('audio').files);
+            if (!speaker) return setStatus('Укажите ID', 'error');
+            if (!audioFiles.length) return setStatus('Выберите хотя бы один аудиофайл', 'error');
+            if (audioFiles.length > 5) return setStatus('Максимум 5 файлов', 'error');
+
+            const form = new FormData();
+            form.append('speaker', speaker);
+            form.append('name', document.getElementById('name').value || speaker);
+            form.append('sex', document.getElementById('sex').value);
+            form.append('fallback', document.getElementById('fallback').value);
+            form.append('engine', engineSelect.value);
+            form.append('api_token', document.getElementById('apiToken').value);
+            for (const file of audioFiles) {
+                form.append('audio', file);
+            }
+
+            trainBtn.disabled = true;
+            setProgress(0);
+            const engineLabel = engineSelect.value === 'xtts' ? 'XTTS' : 'Silero';
+            setStatus(`Загрузка ${audioFiles.length} образцов (${engineLabel})...`, 'info');
+
+            try {
+                const res = await fetch('/voices/train', { method: 'POST', body: form });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    throw new Error(data.description || data.error || `HTTP ${res.status}`);
+                }
+                pollJob(data.job_id, speaker, data.engine || engineSelect.value);
+            } catch (e) {
+                setStatus('Ошибка: ' + e.message, 'error');
+                trainBtn.disabled = false;
+            }
+        }
+
+        function setProgress(v) { progressBar.style.width = `${v}%`; }
+
+        function pollJob(jobId, speaker, engine) {
+            if (pollTimer) clearInterval(pollTimer);
+            pollTimer = setInterval(async () => {
+                const res = await fetch(`/voices/train/${jobId}`);
+                const job = await res.json();
+                setProgress(job.progress || 0);
+                setStatus(job.message || job.status, job.status === 'error' ? 'error' : 'info');
+                if (job.status === 'done') {
+                    clearInterval(pollTimer);
+                    trainBtn.disabled = false;
+                    const eng = job.result?.engine || engine;
+                    const sim = job.result?.similarity;
+                    const extra = sim != null ? `, сходство ${sim}` : '';
+                    setStatus(`Голос «${job.result.name}» создан (${eng}${extra})`, 'success');
+                    await previewVoice(speaker);
+                    updateEngineStatus();
+                } else if (job.status === 'error') {
+                    clearInterval(pollTimer);
+                    trainBtn.disabled = false;
+                }
+            }, 2000);
+        }
+
+        async function previewVoice(speaker) {
+            const res = await fetch('/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    text: document.getElementById('previewText').value,
+                    speaker,
+                    api_token: document.getElementById('apiToken').value,
+                    format: 'ogg',
+                    sample_rate: 24000,
+                }),
+            });
+            const json = await res.json();
+            const blob = new Blob([Uint8Array.from(atob(json.results[0].audio), c => c.charCodeAt(0))], { type: 'audio/ogg' });
+            previewPlayer.src = URL.createObjectURL(blob);
+            previewPlayer.style.display = 'block';
+            previewPlayer.play().catch(() => {});
+        }
+
+        document.getElementById('sex').addEventListener('change', (e) => {
+            const fb = document.getElementById('fallback');
+            if (e.target.value === 'Male') fb.value = 'eugene';
+            else if (e.target.value === 'Female') fb.value = 'xenia';
+            else fb.value = 'baya';
+        });
+    </script>
+</body>
+</html>

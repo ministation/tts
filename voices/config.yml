@@ -108,5 +108,61 @@ voices:
     sex: Male
     fallback: eugene
     source: custom
+    engine: silero
+    description: Обучен по образцу (Silero)
+  abaddon:
+    name: Абаддон
+    sex: Male
+    fallback: eugene
+    source: custom
     engine: xtts
     description: Клонирован по образцу (XTTS)
+  alchemist:
+    name: Alchemist
+    sex: Male
+    fallback: eugene
+    source: custom
+    engine: xtts
+    description: Клонирован по образцу (XTTS)
+  luna:
+    name: luna
+    sex: Female
+    fallback: xenia
+    source: custom
+    engine: xtts
+    description: Клонирован по образцу (XTTS)
+  lina:
+    name: lina
+    sex: Female
+    fallback: xenia
+    source: custom
+    engine: xtts
+    description: Клонирован по образцу (XTTS)
+  queenofpain:
+    name: queen of Pain
+    sex: Female
+    fallback: xenia
+    source: custom
+    engine: xtts
+    description: Клонирован по образцу (XTTS)
+  shadowshaman:
+    name: Shadow Shaman
+    sex: Male
+    fallback: eugene
+    source: custom
+    engine: xtts
+    description: Клонирован по образцу (XTTS)
+  stormspirit:
+    name: Storm Spirit
+    sex: Male
+    fallback: eugene
+    source: custom
+    engine: xtts
+    description: Клонирован по образцу (XTTS)
+  lina1:
+    name: lina1
+    sex: Female
+    fallback: xenia
+    source: custom
+    engine: silero
+    description: Обучен по образцу (Silero)

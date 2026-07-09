@@ -5,5 +5,6 @@ Flask
 jsonify
 PyYAML
 librosa
+speechbrain
 requests
 git+https://github.com/Desklop/StressRNN

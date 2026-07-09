@@ -7,6 +7,8 @@ import soundfile as sf
 
 SAMPLE_RATE = 24000
 MAX_SECONDS = 30
+MAX_SECONDS_PER_FILE = 15
+MAX_REFERENCE_FILES = 5
 
 
 def _ffmpeg_path():
@@ -49,6 +51,20 @@ def prepare_reference(input_path, output_path, max_seconds=MAX_SECONDS, target_s
     audio = (audio / peak) * 0.95
     sf.write(output_path, audio, target_sr)
     return output_path
+
+
+def prepare_references(input_paths, output_dir, max_files=MAX_REFERENCE_FILES):
+    os.makedirs(output_dir, exist_ok=True)
+    paths = [p for p in input_paths if p and os.path.isfile(p)][:max_files]
+    if not paths:
+        raise ValueError("No input audio files")
+    max_seconds = MAX_SECONDS_PER_FILE if len(paths) > 1 else MAX_SECONDS
+    prepared = []
+    for idx, input_path in enumerate(paths, 1):
+        output_path = os.path.join(output_dir, f"{idx:03d}.wav")
+        prepare_reference(input_path, output_path, max_seconds=max_seconds)
+        prepared.append(output_path)
+    return prepared
 
 
 def temp_upload_path(upload_storage, suffix=".upload"):
