@@ -37,10 +37,20 @@ _SKIP_PHONEMES = frozenset(
 )
 
 # Профиль ближе к «сухой» чёткости Silero (дефолт VITS: 0.667 / 0.8 / 1.0)
-_LENGTH_SCALE = float(os.environ.get("PIPER_LENGTH_SCALE", "0.88"))
-_NOISE_SCALE = float(os.environ.get("PIPER_NOISE_SCALE", "0.18"))
-_NOISE_W_SCALE = float(os.environ.get("PIPER_NOISE_W", "0.28"))
+_LENGTH_SCALE = float(os.environ.get("PIPER_LENGTH_SCALE", "1.15"))
+_NOISE_SCALE = float(os.environ.get("PIPER_NOISE_SCALE", "0.22"))
+_NOISE_W_SCALE = float(os.environ.get("PIPER_NOISE_W", "0.35"))
 _CLARITY = float(os.environ.get("PIPER_CLARITY", "1.0"))  # 0=выкл, 1=как Silero
+
+# Р/Л — сонанты, VITS их часто «съедает»
+_LIQUIDS = frozenset({"r", "ɾ", "ɹ", "ʀ", "ʁ", "l", "ɭ", "ɫ", "ʎ", "ɺ", "ɻ"})
+_LIQUID_MAP = {
+    "ɭ": "l",  # ретрофлексный L у espeak звучит мутно в Piper
+    "ɫ": "l",
+    "ʎ": "l",
+    "ɹ": "r",
+    "ɾ": "r",
+}
 
 
 def is_piper_available():
@@ -96,6 +106,19 @@ def _filter_phonemes(phonemes):
     return [p for p in phonemes if p and p not in _SKIP_PHONEMES]
 
 
+def _reinforce_liquids(phonemes):
+    """Делает Р/Л заметнее: нормализует аллофоны и слегка удлиняет."""
+    out = []
+    for i, p in enumerate(phonemes):
+        p = _LIQUID_MAP.get(p, p)
+        out.append(p)
+        if p in ("r", "l") or p in _LIQUIDS:
+            nxt = phonemes[i + 1] if i + 1 < len(phonemes) else None
+            if nxt != "ː":
+                out.append("ː")
+    return out
+
+
 def _ensure_mono(audio):
     """Гарантированно mono float32 shape (n,). Иначе sf.write(1, n) → N каналов."""
     audio = np.asarray(audio, dtype=np.float32)
@@ -111,10 +134,29 @@ def _ensure_mono(audio):
     return np.ascontiguousarray(audio.reshape(-1))
 
 
+def _boost_liquid_formants(audio, sr):
+    """Лёгкий подъём 600–2000 Гц — форманты Р/Л."""
+    x = _ensure_mono(audio)
+    n = len(x)
+    if n < 32:
+        return x
+    spec = np.fft.rfft(x)
+    freqs = np.fft.rfftfreq(n, d=1.0 / float(sr))
+    gain = np.ones_like(freqs, dtype=np.float64)
+    # плавный колокол ~1.1 кГц
+    center, width = 1100.0, 900.0
+    band = np.exp(-0.5 * ((freqs - center) / width) ** 2)
+    gain += 0.55 * band
+    y = np.fft.irfft(spec * gain, n=n).astype(np.float32)
+    peak = float(np.max(np.abs(y))) + 1e-8
+    y *= (float(np.max(np.abs(x))) + 1e-8) / peak
+    return np.ascontiguousarray(y)
+
+
 def _clarify_like_silero(audio, sr):
     """
     Постобработка под более «сухой» Silero-подобный звук:
-    частично pre-emphasis + нормализация (полный pre-emphasis звучит резко).
+    частично pre-emphasis + акцент формант Р/Л + нормализация.
     """
     if _CLARITY <= 0 or audio.size < 16:
         return audio
@@ -127,8 +169,9 @@ def _clarify_like_silero(audio, sr):
     y[1:] = x[1:] - coef * x[:-1]
 
     # Микс сухого VITS и подчёркнутого — ближе к Silero, без металлического ВЧ
-    mix = 0.45 * min(1.0, _CLARITY)
+    mix = 0.40 * min(1.0, _CLARITY)
     out = (1.0 - mix) * x + mix * y
+    out = _boost_liquid_formants(out, sr)
 
     peak = float(np.max(np.abs(out))) + 1e-8
     out *= 0.92 / peak
@@ -154,7 +197,7 @@ def _is_sign_letter_name(phonemes):
 
 
 def _audio_from_phonemes(voice, phonemes, syn_config, sr):
-    phonemes = _filter_phonemes(phonemes)
+    phonemes = _reinforce_liquids(_filter_phonemes(phonemes))
     if not phonemes or _is_sign_letter_name(phonemes):
         return None
     ids = voice.phonemes_to_ids(phonemes)
@@ -180,7 +223,7 @@ def _synthesize_from_phonemes(voice, text):
 
     all_phonemes = []
     for sentence in voice.phonemize(text) or []:
-        filtered = _filter_phonemes(sentence)
+        filtered = _reinforce_liquids(_filter_phonemes(sentence))
         if not filtered or _is_sign_letter_name(filtered):
             continue
         all_phonemes.extend(filtered)
@@ -188,10 +231,18 @@ def _synthesize_from_phonemes(voice, text):
     if not all_phonemes:
         return np.zeros(sr // 10, dtype=np.float32), sr
 
-    audio = _audio_from_phonemes(voice, all_phonemes, syn, sr)
-    if audio is None:
+    # уже усилены liquids выше — не применять reinforce дважды
+    ids = voice.phonemes_to_ids(all_phonemes)
+    audio = voice.phoneme_ids_to_audio(ids, syn_config=syn)
+    if isinstance(audio, tuple):
+        audio = audio[0]
+    audio = _ensure_mono(audio)
+    if audio.size == 0:
         return np.zeros(sr // 10, dtype=np.float32), sr
-    return _clarify_like_silero(_ensure_mono(audio), sr), sr
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 1.5:
+        audio = audio / 32768.0
+    return _clarify_like_silero(audio, sr), sr
 
 
 def synthesize(text, speaker_id=None, onnx_path=None, sample_rate=22050):
