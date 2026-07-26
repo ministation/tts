@@ -55,11 +55,8 @@ enabled=true
 Только Silero + Piper. Инструкция: **[docs/DEPLOY.ru.md](docs/DEPLOY.ru.md)**
 
 ```bash
-cd /home/ss14_user/ss14_tts_api
-./scripts/setup_linux.sh
-sudo cp deploy/ss14-tts.service /etc/systemd/system/
-sudo systemctl enable --now ss14-tts
-# по умолчанию: порт 8000, apitoken=test
+cd /home/ss14_user/ss14_tts_api && bash scripts/install_root.sh
+# порт 8000, apitoken=test, сервис ss14-tts от root
 ```
 
 ### Добавление своих голосов

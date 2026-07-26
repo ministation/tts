@@ -26,9 +26,15 @@ fi
 
 echo "==> Система: espeak-ng, libsndfile (для Piper/Silero)"
 if command -v apt-get >/dev/null 2>&1; then
-  sudo apt-get update
-  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    espeak-ng libsndfile1 ffmpeg git build-essential
+  if [[ "${EUID}" -eq 0 ]]; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      espeak-ng libsndfile1 ffmpeg git build-essential
+  else
+    sudo apt-get update
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      espeak-ng libsndfile1 ffmpeg git build-essential
+  fi
 fi
 
 echo "==> Python: ${PYTHON_BIN} ($("${PYTHON_BIN}" -V))"
