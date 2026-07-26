@@ -436,11 +436,15 @@ def _keep_original_yo(original, processed):
 
 
 def plain_text_for_piper(text_content, put_yo=False):
-    """Текст для Piper: без Silero-«+». Кириллическую «е» не трогаем — так звук /э/, не /йе/."""
+    """Текст для Piper: без символов, которые espeak читает вслух (+, /, -, _)."""
     if not text_content:
         return ""
-    # put_yo зарезервирован для совместимости API; Piper/espeak «ё» ставит только из буквы «ё»
-    return str(text_content).replace("+", "")
+    # put_yo зарезервирован для совместимости API
+    text = str(text_content)
+    # +, /, \, -, тире, подчёркивание — иначе «плюс», «косая черта», «прочерк»
+    text = re.sub(r"[+/\\_\u2010-\u2015\u2212\-]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
 
 
 if __name__ == '__main__':
