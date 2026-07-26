@@ -1,6 +1,6 @@
 import os
 
-from src.VoiceRegistry import install_clone_voice, get_voice_model_path
+from src.VoiceRegistry import install_clone_voice
 
 
 def train_voice_from_upload(
@@ -11,14 +11,14 @@ def train_voice_from_upload(
     sex,
     fallback,
     description,
-    engine="silero",
+    engine="piper",
     progress=None,
 ):
     if isinstance(reference_paths, str):
         reference_paths = [reference_paths]
 
     if progress:
-        progress(progress=10, message=f"Сохранение {len(reference_paths)} образцов...")
+        progress(progress=8, message=f"Сохранение {len(reference_paths)} образцов...")
     paths = install_clone_voice(
         speaker,
         reference_paths,
@@ -29,10 +29,38 @@ def train_voice_from_upload(
         engine=engine,
     )
 
+    if engine == "piper":
+        return _train_piper(speaker, name, paths, progress)
     if engine == "xtts":
         return _train_xtts(speaker, name, paths, progress)
-
     return _train_silero(model, speaker, name, sex, paths, progress)
+
+
+def _train_piper(speaker, name, paths, progress):
+    from src.PiperTrainer import train_piper_voice
+
+    if progress:
+        progress(progress=12, message="Обучение Piper (долго на CPU)...")
+    result = train_piper_voice(
+        speaker,
+        paths["references"],
+        progress=progress,
+    )
+    if progress:
+        progress(progress=98, message="Готово")
+    return {
+        "speaker": speaker,
+        "name": name,
+        "engine": "piper",
+        "utterances": result.get("utterances"),
+        "mode": result.get("mode"),
+        "trained": result.get("trained"),
+        "paths": {
+            **paths,
+            "onnx": result.get("onnx"),
+            "config": result.get("config"),
+        },
+    }
 
 
 def _train_silero(model, speaker, name, sex, paths, progress):
@@ -88,6 +116,5 @@ def _train_xtts(speaker, name, paths, progress):
         "speaker": speaker,
         "name": name,
         "engine": "xtts",
-        "engine": engine,
         "paths": paths,
     }

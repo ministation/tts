@@ -1,0 +1,32 @@
+[Unit]
+Description=SS14 TTS API (Silero + Piper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ss14_user
+Group=ss14_user
+WorkingDirectory=/home/ss14_user/ss14_tts_api
+
+Environment=apitoken=test
+Environment=PORT=8000
+Environment=threads=6
+Environment=PATH=/home/ss14_user/ss14_tts_api/.venv/bin:/usr/local/bin:/usr/bin
+
+ExecStart=/home/ss14_user/ss14_tts_api/.venv/bin/python /home/ss14_user/ss14_tts_api/wsgi.py
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=300
+
+# Логи в journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ss14-tts
+
+# Безопасность (мягкий профиль)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

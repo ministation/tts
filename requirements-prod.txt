@@ -1,0 +1,12 @@
+# Продакшен runtime: Silero + Piper (без XTTS / обучения)
+torch
+soundfile
+Flask
+PyYAML
+numpy
+requests
+gevent
+piper-tts
+onnxruntime
+huggingface_hub
+git+https://github.com/Desklop/StressRNN

@@ -2,3 +2,6 @@
 model.pt
 *.pt
 clone_venv/
+piper_venv/
+models/
+*.onnx

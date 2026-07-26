@@ -38,7 +38,7 @@ python ss14tts.py
 
 ```
 [tts]
-api_url="http://127.0.0.1:5000/tts"
+api_url="http://127.0.0.1:8000/tts"
 api_token="test"
 enabled=true
 ```
@@ -49,19 +49,33 @@ enabled=true
 
 копирнуть в /Resources/Prototypes/Corvax
 
-### Добавление своих голосов
+### Продакшен на Linux (systemd + .venv)
 
-Подробная инструкция: [docs/VOICES.ru.md](docs/VOICES.ru.md)
+Каталог: `/home/ss14_user/ss14_tts_api`  
+Только Silero + Piper. Инструкция: **[docs/DEPLOY.ru.md](docs/DEPLOY.ru.md)**
 
-Кратко:
 ```bash
-python tools/voice_manager.py generate --count 10   # сгенерировать кандидатов
-python tools/voice_manager.py preview --file voices/tmp/Voice1.pt
-python tools/voice_manager.py install oleg voices/tmp/Voice1.pt --name "Олег" --sex Male
-python tools/voice_manager.py list                  # список всех голосов
+cd /home/ss14_user/ss14_tts_api
+./scripts/setup_linux.sh
+sudo cp deploy/ss14-tts.service /etc/systemd/system/
+sudo systemctl enable --now ss14-tts
+# по умолчанию: порт 8000, apitoken=test
 ```
 
-Кастомные модели кладутся в `voices/<id>.pt`, метаданные — в `voices/config.yml`.
+### Добавление своих голосов
+
+**Полный гайд:** [docs/GUIDE.ru.md](docs/GUIDE.ru.md)
+
+**Пакет 20 быстрых голосов одной командой:**
+```powershell
+python -m pip install -r requirements.txt
+scripts\setup_piper.bat
+python tools/install_fast_pack.py
+python ss14tts.py
+```
+
+Свои клоны (долгое обучение): http://127.0.0.1:5000/train
+
 Для Docker смонтируйте volume: `-v /path/to/voices:/workspace/voices`
 
 ### Скрипт быстрого запуска

@@ -1,3 +1,4 @@
+# Продакшен-реестр: только Silero + Piper (без XTTS)
 builtin:
   aidar:
     name: Айдар
@@ -19,24 +20,29 @@ builtin:
     name: Евгений
     sex: Male
     description: Мужской, глубокий
+
 voices:
+  # --- Silero роли (builtin fallback) ---
   oleg:
     name: Олег
     sex: Male
     fallback: eugene
     source: builtin
+    engine: silero
     description: Офицерский мужской голос
   zina:
     name: Зина
     sex: Female
     fallback: xenia
     source: builtin
+    engine: silero
     description: Энергичный женский голос
   garithos:
     name: Гаритос
     sex: Male
     fallback: aidar
     source: builtin
+    engine: silero
     description: Командирский, строгий
     round_start: false
   maiev:
@@ -44,6 +50,7 @@ voices:
     sex: Female
     fallback: xenia
     source: builtin
+    engine: silero
     description: Холодный женский голос
     round_start: false
   myron:
@@ -51,6 +58,7 @@ voices:
     sex: Unsexed
     fallback: baya
     source: builtin
+    engine: silero
     description: Нейтральный, загадочный
     round_start: false
   narrator:
@@ -58,111 +66,192 @@ voices:
     sex: Male
     fallback: aidar
     source: builtin
+    engine: silero
     description: Чёткая дикторская речь
   captain:
     name: Капитан
     sex: Male
     fallback: eugene
     source: builtin
+    engine: silero
     description: Авторитетный командный голос
   doctor:
     name: Доктор
     sex: Female
     fallback: kseniya
     source: builtin
+    engine: silero
     description: Спокойный медицинский голос
   bartender:
     name: Бармен
     sex: Male
     fallback: eugene
     source: builtin
+    engine: silero
     description: Дружелюбный, непринуждённый
   scientist:
     name: Учёный
     sex: Unsexed
     fallback: baya
     source: builtin
+    engine: silero
     description: Взволнованный, быстрый
   security:
     name: Охранник
     sex: Male
     fallback: aidar
     source: builtin
+    engine: silero
     description: Резкий, деловой
   clown:
     name: Клоун
     sex: Unsexed
     fallback: baya
     source: builtin
+    engine: silero
     description: Игривый, необычный
     round_start: false
-  antimage:
-    name: Антимаг
+
+  # --- Piper RU ---
+  denis:
+    name: Денис
     sex: Male
     fallback: eugene
     source: custom
-    engine: xtts
-    description: Клонирован по образцу (XTTS)
-  ivan:
-    name: Иван
+    engine: piper
+    description: Piper RU Denis — мужской, чёткий
+  dmitri:
+    name: Дмитрий
+    sex: Male
+    fallback: aidar
+    source: custom
+    engine: piper
+    description: Piper RU Dmitri — мужской, спокойный
+  irina:
+    name: Ирина
+    sex: Female
+    fallback: xenia
+    source: custom
+    engine: piper
+    description: Piper RU Irina — женский, нейтральный
+  ruslan:
+    name: Руслан
+    sex: Male
+    fallback: eugene
+    source: custom
+    engine: piper
+    description: Piper RU Ruslan — мужской, низкий
+
+  # --- Silero custom .pt ---
+  viktor:
+    name: Виктор
     sex: Male
     fallback: eugene
     source: custom
     engine: silero
-    description: Обучен по образцу (Silero)
-  abaddon:
-    name: Абаддон
+    description: Silero custom — мужской
+  andrei:
+    name: Андрей
+    sex: Male
+    fallback: aidar
+    source: custom
+    engine: silero
+    description: Silero custom — мужской
+  sergei:
+    name: Сергей
     sex: Male
     fallback: eugene
     source: custom
-    engine: xtts
-    description: Клонирован по образцу (XTTS)
-  alchemist:
-    name: Alchemist
+    engine: silero
+    description: Silero custom — мужской
+  pavel:
+    name: Павел
+    sex: Male
+    fallback: aidar
+    source: custom
+    engine: silero
+    description: Silero custom — мужской
+  nikita:
+    name: Никита
     sex: Male
     fallback: eugene
     source: custom
-    engine: xtts
-    description: Клонирован по образцу (XTTS)
-  luna:
-    name: luna
-    sex: Female
-    fallback: xenia
-    source: custom
-    engine: xtts
-    description: Клонирован по образцу (XTTS)
-  lina:
-    name: lina
-    sex: Female
-    fallback: xenia
-    source: custom
-    engine: xtts
-    description: Клонирован по образцу (XTTS)
-  queenofpain:
-    name: queen of Pain
-    sex: Female
-    fallback: xenia
-    source: custom
-    engine: xtts
-    description: Клонирован по образцу (XTTS)
-  shadowshaman:
-    name: Shadow Shaman
+    engine: silero
+    description: Silero custom — мужской
+  roman:
+    name: Роман
     sex: Male
-    fallback: eugene
+    fallback: aidar
     source: custom
-    engine: xtts
-    description: Клонирован по образцу (XTTS)
-  stormspirit:
-    name: Storm Spirit
-    sex: Male
-    fallback: eugene
-    source: custom
-    engine: xtts
-    description: Клонирован по образцу (XTTS)
-  lina1:
-    name: lina1
+    engine: silero
+    description: Silero custom — мужской
+  anton:
+    name: Антон
     sex: Female
     fallback: xenia
     source: custom
     engine: silero
-    description: Обучен по образцу (Silero)
+    description: Silero custom — женский
+  maxim:
+    name: Максим
+    sex: Male
+    fallback: aidar
+    source: custom
+    engine: silero
+    description: Silero custom — мужской
+  anna:
+    name: Анна
+    sex: Female
+    fallback: xenia
+    source: custom
+    engine: silero
+    description: Silero custom — женский
+  maria:
+    name: Мария
+    sex: Female
+    fallback: kseniya
+    source: custom
+    engine: silero
+    description: Silero custom — женский
+  elena:
+    name: Елена
+    sex: Female
+    fallback: xenia
+    source: custom
+    engine: silero
+    description: Silero custom — женский
+  olga:
+    name: Ольга
+    sex: Female
+    fallback: kseniya
+    source: custom
+    engine: silero
+    description: Silero custom — женский
+  natalia:
+    name: Наталья
+    sex: Male
+    fallback: eugene
+    source: custom
+    engine: silero
+    description: Silero custom — мужской
+  svetlana:
+    name: Светлана
+    sex: Female
+    fallback: kseniya
+    source: custom
+    engine: silero
+    description: Silero custom — женский
+  daria:
+    name: Дарья
+    sex: Female
+    fallback: xenia
+    source: custom
+    engine: silero
+    description: Silero custom — женский
+  sofia:
+    name: София
+    sex: Female
+    fallback: kseniya
+    source: custom
+    engine: silero
+    description: Silero custom — женский

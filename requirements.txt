@@ -7,4 +7,8 @@ PyYAML
 librosa
 speechbrain
 requests
+piper-tts
+onnxruntime
+huggingface_hub
+faster-whisper
 git+https://github.com/Desklop/StressRNN

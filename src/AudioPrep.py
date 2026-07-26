@@ -9,6 +9,9 @@ SAMPLE_RATE = 24000
 MAX_SECONDS = 30
 MAX_SECONDS_PER_FILE = 15
 MAX_REFERENCE_FILES = 5
+MAX_TRAIN_FILES = 50
+PIPER_SR = 22050
+MAX_TRAIN_SECONDS_PER_FILE = 600  # до 10 минут на файл
 
 
 def _ffmpeg_path():
@@ -63,6 +66,25 @@ def prepare_references(input_paths, output_dir, max_files=MAX_REFERENCE_FILES):
     for idx, input_path in enumerate(paths, 1):
         output_path = os.path.join(output_dir, f"{idx:03d}.wav")
         prepare_reference(input_path, output_path, max_seconds=max_seconds)
+        prepared.append(output_path)
+    return prepared
+
+
+def prepare_training_uploads(input_paths, output_dir, max_files=MAX_TRAIN_FILES, target_sr=PIPER_SR):
+    """Подготовка длинных аудио для Piper (без жёсткой обрезки до 15с)."""
+    os.makedirs(output_dir, exist_ok=True)
+    paths = [p for p in input_paths if p and os.path.isfile(p)][:max_files]
+    if not paths:
+        raise ValueError("No input audio files")
+    prepared = []
+    for idx, input_path in enumerate(paths, 1):
+        output_path = os.path.join(output_dir, f"{idx:03d}.wav")
+        prepare_reference(
+            input_path,
+            output_path,
+            max_seconds=MAX_TRAIN_SECONDS_PER_FILE,
+            target_sr=target_sr,
+        )
         prepared.append(output_path)
     return prepared
 

@@ -197,7 +197,7 @@
                     const opt = document.createElement('option');
                     opt.value = voice.id;
                     const sexLabel = voice.sex === 'Male' ? 'м' : voice.sex === 'Female' ? 'ж' : 'у';
-                    const modelMark = voice.engine === 'xtts' ? '◎XTTS' : (voice.uses_custom ? '★' : `→${voice.active_speaker || voice.fallback}`);
+                    const modelMark = voice.engine === 'piper' ? '⚡Piper' : (voice.engine === 'xtts' ? '◎XTTS' : (voice.uses_custom ? '★' : `→${voice.active_speaker || voice.fallback}`));
                     opt.textContent = `${voice.name} (${sexLabel}) ${modelMark}`.trim();
                     select.appendChild(opt);
                 });

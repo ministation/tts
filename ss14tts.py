@@ -4,9 +4,20 @@ import re
 from stressrnn import StressRNN
 
 from src.SpeakerPatch import SpeakerPatch, SpeakerPatchInit, GetAllSpeakers
-from src.VoiceRegistry import list_all_voices, has_model, add_voice_to_config, set_voice_source, BUILTIN_SPEAKERS, is_xtts_voice, get_reference_paths, get_voice_model_path
+from src.VoiceRegistry import (
+    list_all_voices,
+    has_model,
+    add_voice_to_config,
+    set_voice_source,
+    BUILTIN_SPEAKERS,
+    is_xtts_voice,
+    is_piper_voice,
+    get_reference_paths,
+    get_voice_model_path,
+    get_piper_model_path,
+)
 from src.TrainingJobs import create_job, get_job, run_job
-from src.AudioPrep import prepare_references, MAX_REFERENCE_FILES
+from src.AudioPrep import prepare_references, prepare_training_uploads, MAX_REFERENCE_FILES, MAX_TRAIN_FILES
 from src.VoiceCloner import train_voice_from_upload
 from src.CloneClient import health as clone_health, is_available as clone_available
 from src.WarmUp import WarmUp
@@ -147,24 +158,35 @@ def api_train_voice():
     if sex not in ('Male', 'Female', 'Unsexed'):
         abort(400, description="Invalid sex")
     fallback = request.form.get('fallback')
-    engine = (request.form.get('engine') or 'silero').strip().lower()
-    if engine not in ('silero', 'xtts'):
-        abort(400, description="engine должен быть silero или xtts")
-    description = request.form.get('description') or (
-        'Клонирован по образцу (XTTS)' if engine == 'xtts' else 'Обучен по образцу (Silero)'
-    )
+    engine = (request.form.get('engine') or 'piper').strip().lower()
+    if engine not in ('piper', 'silero', 'xtts'):
+        abort(400, description="engine должен быть piper, silero или xtts")
+    description = request.form.get('description') or {
+        'piper': 'Обучен Piper (ONNX, CPU)',
+        'xtts': 'Клонирован по образцу (XTTS)',
+        'silero': 'Обучен по образцу (Silero)',
+    }.get(engine, 'Кастомный голос')
 
     audio_files = []
     for key in ('audio', 'audio[]'):
         audio_files.extend(request.files.getlist(key))
     audio_files = [f for f in audio_files if f and f.filename]
     if not audio_files:
-        abort(400, description="Не выбраны аудиофайлы. Добавьте 1–5 записей с речью.")
-    if len(audio_files) > MAX_REFERENCE_FILES:
-        abort(400, description=f"Слишком много файлов (максимум {MAX_REFERENCE_FILES})")
+        abort(400, description="Не выбраны аудиофайлы. Для Piper лучше 5–10+ минут речи.")
+    max_files = MAX_TRAIN_FILES if engine == 'piper' else MAX_REFERENCE_FILES
+    if len(audio_files) > max_files:
+        abort(400, description=f"Слишком много файлов (максимум {max_files})")
 
     if engine == 'xtts' and not clone_available():
         abort(503, description="XTTS не установлен. Запустите: powershell -File scripts/setup_clone.ps1")
+    if engine == 'piper':
+        from src.PiperEngine import is_piper_available
+        from src.PiperTrainer import is_whisper_available
+        if not is_whisper_available():
+            abort(
+                503,
+                description="Для Piper нужен faster-whisper. Запустите: powershell -File scripts/setup_piper.ps1",
+            )
 
     import shutil
     import tempfile
@@ -180,7 +202,10 @@ def api_train_voice():
             if os.path.getsize(raw.name) < 1024:
                 raise ValueError(f"Файл {audio.filename} слишком маленький или пустой")
             uploads.append(raw.name)
-        prepared = prepare_references(uploads, refs_dir)
+        if engine == 'piper':
+            prepared = prepare_training_uploads(uploads, refs_dir)
+        else:
+            prepared = prepare_references(uploads, refs_dir)
     except Exception as exc:
         shutil.rmtree(refs_dir, ignore_errors=True)
         abort(400, description=f"Ошибка обработки аудио: {exc}")
@@ -211,11 +236,32 @@ def api_train_voice():
     return jsonify({'job_id': job_id, 'engine': engine, 'references': len(prepared)})
 
 
+@app.route('/voices/train/status', methods=['GET'])
+def api_train_stack_status():
+    from src.PiperTrainer import piper_status
+    from src.PiperEngine import is_piper_available
+
+    status = piper_status()
+    status['piper_runtime'] = is_piper_available()
+    status['xtts_installed'] = clone_available()
+    status['xtts_running'] = clone_health()
+    return jsonify(status)
+
+
 @app.route('/voices/clone/status', methods=['GET'])
 def api_clone_status():
+    # legacy endpoint — теперь отражает Piper stack
+    from src.PiperTrainer import piper_status
+    from src.PiperEngine import is_piper_available
+
+    st = piper_status()
     return jsonify({
-        'installed': clone_available(),
-        'running': clone_health(),
+        'installed': is_piper_available() or st.get('whisper'),
+        'running': True,
+        'engine': 'piper',
+        'details': st,
+        'xtts_installed': clone_available(),
+        'xtts_running': clone_health(),
     })
 
 
@@ -259,11 +305,25 @@ def doTTS():
     if 'format' not in req:
         req['format'] = 'ogg'
 
-    if is_xtts_voice(req['speaker']):
+    if is_piper_voice(req['speaker']):
+        from src.PiperEngine import synthesize as piper_synthesize
+        # Piper не понимает маркеры ударения Silero (+) и читает их вслух
+        text = plain_text_for_piper(req['text'], put_yo=req['put_yo'])
+        audio, piper_sr = piper_synthesize(text, speaker_id=req['speaker'])
+        if piper_sr != req['sample_rate']:
+            import numpy as np
+            duration = len(audio) / float(piper_sr)
+            new_len = max(1, int(duration * req['sample_rate']))
+            audio = np.interp(
+                np.linspace(0, len(audio) - 1, new_len),
+                np.arange(len(audio)),
+                audio,
+            )
+    elif is_xtts_voice(req['speaker']):
         voice_model = get_voice_model_path(req['speaker'])
         refs = get_reference_paths(req['speaker'])
         from src.CloneClient import synthesize as clone_synthesize, encode_voice
-        text = patch_text(req['text'])
+        text = plain_text_for_piper(req['text'])
         if not os.path.isfile(voice_model):
             if not refs:
                 abort(404, description=f"Voice model not found: {req['speaker']}.pt")
@@ -297,7 +357,7 @@ def doTTS():
                 voice_path=voiceFile
             )
         else:
-            audio = model.apply_tts(text=patch_text(req['text']),
+            audio = model.apply_tts(text=patch_text(req['text'], put_yo=req['put_yo']),
                 speaker=speaker,
                 sample_rate=req['sample_rate'],
                 put_accent=req['put_accent'],
@@ -339,14 +399,50 @@ def patch_ssml(ssml_content):
     patched_ssml = re.sub(r'>([^<>]+)<', add_accents, ssml_content)
     return patched_ssml
 
-def patch_text(text_content):
+def patch_text(text_content, put_yo=False):
     text = ""
     try:
         text = accent.put_stress(text_content)
     except:
         text = text_content  # Если не удалось поставить ударение, возвращаем исходный текст
+    if not put_yo:
+        text = _keep_original_yo(text_content, text)
     return text
+
+
+def _keep_original_yo(original, processed):
+    """StressRNN часто меняет «е»→«ё»; оставляем «ё» только если оно было в исходнике."""
+    if not processed:
+        return processed
+    orig_letters = [c for c in str(original) if c.isalpha()]
+    out = []
+    i = 0
+    for ch in processed:
+        if ch == "+":
+            out.append(ch)
+            continue
+        if ch in ("ё", "Ё") and i < len(orig_letters):
+            src = orig_letters[i]
+            if src in ("е", "Е"):
+                out.append("е" if ch == "ё" else "Е")
+            else:
+                out.append(ch)
+            i += 1
+        else:
+            if ch.isalpha():
+                i += 1
+            out.append(ch)
+    return "".join(out)
+
+
+def plain_text_for_piper(text_content, put_yo=False):
+    """Текст для Piper: без Silero-«+». Кириллическую «е» не трогаем — так звук /э/, не /йе/."""
+    if not text_content:
+        return ""
+    # put_yo зарезервирован для совместимости API; Piper/espeak «ё» ставит только из буквы «ё»
+    return str(text_content).replace("+", "")
+
 
 if __name__ == '__main__':
     WarmUp(model,speakers)
-    app.run(host= '0.0.0.0',debug=False,port=int(os.environ.get("PORT","5000")))
+    app.run(host= '0.0.0.0',debug=False,port=int(os.environ.get("PORT","8000")))

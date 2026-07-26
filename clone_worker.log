@@ -1,0 +1,12 @@
+
+--- starting worker 2026-07-27 00:31:52 ---
+XTTS worker starting on http://127.0.0.1:5001
+ * Serving Flask app 'clone_worker'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on http://127.0.0.1:5001
+Press CTRL+C to quit
+127.0.0.1 - - [27/Jul/2026 00:31:56] "GET /health HTTP/1.1" 200 -
+Loading XTTS v2 on cpu (first run downloads ~2 GB)...
+XTTS ready
+127.0.0.1 - - [27/Jul/2026 00:32:40] "POST /synthesize HTTP/1.1" 200 -

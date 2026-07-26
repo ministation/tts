@@ -6,7 +6,7 @@ import yaml
 
 BUILTIN_SPEAKERS = ("aidar", "baya", "kseniya", "xenia", "eugene")
 SEX_VALUES = ("Male", "Female", "Unsexed")
-ENGINES = ("silero", "xtts")
+ENGINES = ("silero", "piper", "xtts")
 SEX_FALLBACK = {
     "Male": "aidar",
     "Female": "xenia",
@@ -63,6 +63,20 @@ def get_voice_model_path(speaker_id, voices_dir=None):
     return os.path.join(voices_dir, f"{speaker_id}.pt")
 
 
+def get_piper_model_path(speaker_id, voices_dir=None):
+    voices_dir = voices_dir or _voices_dir()
+    return os.path.join(voices_dir, f"{speaker_id}.onnx")
+
+
+def get_piper_config_path(speaker_id, voices_dir=None):
+    voices_dir = voices_dir or _voices_dir()
+    for name in (f"{speaker_id}.onnx.json", f"{speaker_id}.json"):
+        path = os.path.join(voices_dir, name)
+        if os.path.isfile(path):
+            return path
+    return os.path.join(voices_dir, f"{speaker_id}.onnx.json")
+
+
 def migrate_legacy_voice_pt(speaker_id, voices_dir=None):
     voices_dir = voices_dir or _voices_dir()
     legacy = os.path.join(voices_dir, speaker_id, "voice.pt")
@@ -74,13 +88,19 @@ def migrate_legacy_voice_pt(speaker_id, voices_dir=None):
 
 def has_silero_model(speaker_id, voices_dir=None):
     entry = get_voice_config(speaker_id)
-    if entry and entry.get("engine") == "xtts":
+    if entry and entry.get("engine") in ("xtts", "piper"):
         return False
     return os.path.isfile(get_voice_model_path(speaker_id, voices_dir))
 
 
 def has_clone_reference(speaker_id, voices_dir=None):
     return bool(get_reference_paths(speaker_id, voices_dir))
+
+
+def has_piper_model(speaker_id, voices_dir=None):
+    onnx = get_piper_model_path(speaker_id, voices_dir)
+    cfg = get_piper_config_path(speaker_id, voices_dir)
+    return os.path.isfile(onnx) and os.path.isfile(cfg)
 
 
 def has_xtts_model(speaker_id, voices_dir=None):
@@ -96,7 +116,10 @@ def has_xtts_model(speaker_id, voices_dir=None):
 
 def has_model(speaker_id, voices_dir=None):
     entry = get_voice_config(speaker_id)
-    if entry and entry.get("engine") == "xtts":
+    engine = entry.get("engine", "silero") if entry else "silero"
+    if engine == "piper":
+        return has_piper_model(speaker_id, voices_dir) or has_clone_reference(speaker_id, voices_dir)
+    if engine == "xtts":
         return has_xtts_model(speaker_id, voices_dir) or has_clone_reference(speaker_id, voices_dir)
     return has_silero_model(speaker_id, voices_dir) or has_clone_reference(speaker_id, voices_dir)
 
@@ -110,6 +133,8 @@ def get_engine(speaker_id, config=None):
     entry = get_voice_config(speaker_id, config)
     if entry:
         return entry.get("engine", "silero")
+    if has_piper_model(speaker_id):
+        return "piper"
     if has_clone_reference(speaker_id):
         return "xtts"
     return "silero"
@@ -118,13 +143,26 @@ def get_engine(speaker_id, config=None):
 def uses_custom_model(speaker_id, config=None):
     entry = get_voice_config(speaker_id, config)
     if not entry:
-        return has_silero_model(speaker_id) or has_clone_reference(speaker_id)
+        return (
+            has_silero_model(speaker_id)
+            or has_piper_model(speaker_id)
+            or has_clone_reference(speaker_id)
+        )
     if entry.get("source", "builtin") != "custom":
         return False
     engine = entry.get("engine", "silero")
+    if engine == "piper":
+        return has_piper_model(speaker_id) or has_clone_reference(speaker_id)
     if engine == "xtts":
         return has_xtts_model(speaker_id) or has_clone_reference(speaker_id)
     return has_silero_model(speaker_id)
+
+
+def is_piper_voice(speaker_id, config=None):
+    entry = get_voice_config(speaker_id, config)
+    if entry:
+        return entry.get("engine") == "piper" and has_piper_model(speaker_id)
+    return has_piper_model(speaker_id)
 
 
 def is_xtts_voice(speaker_id, config=None):
@@ -168,7 +206,14 @@ def get_voice_entry(speaker_id, config=None):
         custom = uses_custom_model(speaker_id, config)
         fallback = get_fallback(speaker_id, config)
         engine = entry.get("engine", "silero")
-        active = "xtts-clone" if engine == "xtts" and custom else ("random" if custom else fallback)
+        if engine == "piper" and custom:
+            active = "piper"
+        elif engine == "xtts" and custom:
+            active = "xtts-clone"
+        elif custom:
+            active = "random"
+        else:
+            active = fallback
         return {
             "id": speaker_id,
             "name": entry.get("name", speaker_id),
@@ -223,6 +268,25 @@ def list_all_voices(model_speakers, include_random=False):
                 "source": entry.get("source", "custom") if entry else "custom",
                 "engine": engine,
                 "active_speaker": "xtts-clone" if engine == "xtts" else "random",
+                "fallback": entry.get("fallback") if entry else None,
+            })
+
+    for onnx_path in glob.glob(os.path.join(voices_dir, "*.onnx")):
+        speaker_id = os.path.basename(onnx_path).replace(".onnx", "")
+        if speaker_id not in seen:
+            seen.add(speaker_id)
+            entry = get_voice_config(speaker_id, config)
+            result.append({
+                "id": speaker_id,
+                "name": entry.get("name", speaker_id) if entry else speaker_id,
+                "sex": entry.get("sex", "Unsexed") if entry else "Unsexed",
+                "description": entry.get("description", "Piper ONNX") if entry else "Piper ONNX",
+                "builtin": False,
+                "has_model": True,
+                "uses_custom": True,
+                "source": entry.get("source", "custom") if entry else "custom",
+                "engine": "piper",
+                "active_speaker": "piper",
                 "fallback": entry.get("fallback") if entry else None,
             })
 
@@ -290,17 +354,21 @@ def install_clone_voice(
     shutil.copy2(saved_refs[0], ref_dst)
 
     voice_model = get_voice_model_path(speaker_id)
+    piper_model = get_piper_model_path(speaker_id)
     migrate_legacy_voice_pt(speaker_id)
     if engine not in ENGINES:
         raise ValueError(f"engine must be one of {ENGINES}")
+    default_desc = {
+        "piper": "Обучен Piper (ONNX, CPU)",
+        "xtts": "Клонирован по образцу (XTTS)",
+        "silero": "Обучен по образцу (Silero)",
+    }.get(engine, "Кастомный голос")
     add_voice_to_config(
         speaker_id,
         name,
         sex,
         fallback,
-        description or (
-            "Клонирован по образцу (XTTS)" if engine == "xtts" else "Обучен по образцу (Silero)"
-        ),
+        description or default_desc,
         source="custom",
         engine=engine,
     )
@@ -308,6 +376,7 @@ def install_clone_voice(
         "reference": ref_dst,
         "references": saved_refs,
         "voice_model": voice_model,
+        "piper_model": piper_model,
         "profile_dir": profile_dir,
     }
 

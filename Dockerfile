@@ -19,6 +19,8 @@ RUN pip3 install gevent
 RUN ldconfig
 ADD test.py .
 RUN python test.py
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD curl --fail http://localhost:5000/health || exit 1
-EXPOSE 5000
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD curl --fail http://localhost:8000/health || exit 1
+EXPOSE 8000
+ENV PORT=8000
+ENV apitoken=test
 ENTRYPOINT [ "python", "wsgi.py" ]
