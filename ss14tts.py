@@ -310,15 +310,16 @@ def doTTS():
         # Piper не понимает маркеры ударения Silero (+) и читает их вслух
         text = plain_text_for_piper(req['text'], put_yo=req['put_yo'])
         audio, piper_sr = piper_synthesize(text, speaker_id=req['speaker'])
+        import numpy as np
+        audio = np.asarray(audio, dtype=np.float32).reshape(-1)
         if piper_sr != req['sample_rate']:
-            import numpy as np
             duration = len(audio) / float(piper_sr)
             new_len = max(1, int(duration * req['sample_rate']))
             audio = np.interp(
                 np.linspace(0, len(audio) - 1, new_len),
                 np.arange(len(audio)),
                 audio,
-            )
+            ).astype(np.float32)
     elif is_xtts_voice(req['speaker']):
         voice_model = get_voice_model_path(req['speaker'])
         refs = get_reference_paths(req['speaker'])
@@ -364,7 +365,16 @@ def doTTS():
                 put_yo=req['put_yo'],
                 voice_path=voiceFile
             )
-    # Saving to bytes buffer
+    # Saving to bytes buffer — всегда mono (N,), иначе (1,N) пишется как N каналов
+    import numpy as np
+    audio = np.asarray(audio, dtype=np.float32)
+    if audio.ndim > 1:
+        if audio.shape[0] <= 8 and audio.shape[0] < audio.shape[-1]:
+            audio = audio.mean(axis=0)
+        else:
+            audio = audio.mean(axis=-1)
+    audio = np.ascontiguousarray(audio.reshape(-1))
+
     with io.BytesIO() as buffer_:
         if req["format"] == "ogg":
             sf.write(buffer_, audio, req['sample_rate'], format="ogg", subtype="VORBIS")
