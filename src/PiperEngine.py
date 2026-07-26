@@ -3,7 +3,6 @@ Piper ONNX runtime — быстрый синтез на CPU.
 """
 import io
 import os
-import re
 import threading
 
 import numpy as np
@@ -37,11 +36,11 @@ _SKIP_PHONEMES = frozenset(
     }
 )
 
-# Чётче и менее «расплывчато», чем дефолт VITS (0.667 / 0.8 / 1.0)
-_LENGTH_SCALE = float(os.environ.get("PIPER_LENGTH_SCALE", "0.9"))
-_NOISE_SCALE = float(os.environ.get("PIPER_NOISE_SCALE", "0.333"))
-_NOISE_W_SCALE = float(os.environ.get("PIPER_NOISE_W", "0.4"))
-_WORD_GAP_MS = int(os.environ.get("PIPER_WORD_GAP_MS", "35"))
+# Профиль ближе к «сухой» чёткости Silero (дефолт VITS: 0.667 / 0.8 / 1.0)
+_LENGTH_SCALE = float(os.environ.get("PIPER_LENGTH_SCALE", "0.88"))
+_NOISE_SCALE = float(os.environ.get("PIPER_NOISE_SCALE", "0.18"))
+_NOISE_W_SCALE = float(os.environ.get("PIPER_NOISE_W", "0.28"))
+_CLARITY = float(os.environ.get("PIPER_CLARITY", "1.0"))  # 0=выкл, 1=как Silero
 
 
 def is_piper_available():
@@ -112,16 +111,41 @@ def _ensure_mono(audio):
     return np.ascontiguousarray(audio.reshape(-1))
 
 
+def _clarify_like_silero(audio, sr):
+    """
+    Постобработка под более «сухой» Silero-подобный звук:
+    частично pre-emphasis + нормализация (полный pre-emphasis звучит резко).
+    """
+    if _CLARITY <= 0 or audio.size < 16:
+        return audio
+    x = _ensure_mono(audio).astype(np.float32, copy=True)
+    x -= float(np.mean(x))
+
+    coef = 0.9
+    y = np.empty_like(x)
+    y[0] = x[0]
+    y[1:] = x[1:] - coef * x[:-1]
+
+    # Микс сухого VITS и подчёркнутого — ближе к Silero, без металлического ВЧ
+    mix = 0.45 * min(1.0, _CLARITY)
+    out = (1.0 - mix) * x + mix * y
+
+    peak = float(np.max(np.abs(out))) + 1e-8
+    out *= 0.92 / peak
+    return np.ascontiguousarray(out, dtype=np.float32)
+
+
 def _is_sign_letter_name(phonemes):
     """Одиночные ь/ъ espeak произносит как «мягкий/твёрдый знак»."""
+    if len(phonemes) > 24:
+        # длинная фраза — не режем целиком из-за ложного совпадения
+        return False
     joined = "".join(phonemes)
-    # мягкийзнак / твёрдыйзнак (без пробелов в фонемах)
     if "znˈɑk" in joined or "znɑk" in joined:
         if "mʲˈɑxk" in joined or "tvʲˈɵrd" in joined or "tvʲˈord" in joined:
             return True
-        if "mʲɑxk" in joined or "мягк" in joined:
+        if "mʲɑxk" in joined:
             return True
-    # эвристика по характерным кускам
     if phonemes[:3] == ["m", "ʲ", "ˈ"] and "z" in phonemes and "n" in phonemes:
         return True
     if phonemes[:2] == ["t", "v"] and "z" in phonemes and "n" in phonemes:
@@ -148,31 +172,26 @@ def _audio_from_phonemes(voice, phonemes, syn_config, sr):
 
 def _synthesize_from_phonemes(voice, text):
     """
-    Синтез по словам: без фонем пробела/пунктуации, без озвучки ь/ъ,
-    с более «сухим» VITS-профилем для чёткости.
+    Один непрерывный пассаж (без нарезки по словам — иначе «заикание»).
+    Пробелы/пунктуация из фонем убраны; clarify один раз на весь клип.
     """
     sr = int(getattr(getattr(voice, "config", None), "sample_rate", None) or 22050)
     syn = _syn_config()
-    gap = np.zeros(max(1, int(sr * _WORD_GAP_MS / 1000.0)), dtype=np.float32)
-    chunks = []
 
-    # По словам — чётче артикуляция и нет «мягкий знак» от оторванных ь
-    words = [w for w in re.split(r"\s+", text.strip()) if w]
-    for word in words:
-        if re.fullmatch(r"[ъьЪЬ]+", word):
+    all_phonemes = []
+    for sentence in voice.phonemize(text) or []:
+        filtered = _filter_phonemes(sentence)
+        if not filtered or _is_sign_letter_name(filtered):
             continue
-        sentences = voice.phonemize(word) or []
-        for sentence in sentences:
-            audio = _audio_from_phonemes(voice, sentence, syn, sr)
-            if audio is None:
-                continue
-            if chunks:
-                chunks.append(gap)
-            chunks.append(audio)
+        all_phonemes.extend(filtered)
 
-    if not chunks:
+    if not all_phonemes:
         return np.zeros(sr // 10, dtype=np.float32), sr
-    return _ensure_mono(np.concatenate(chunks)), sr
+
+    audio = _audio_from_phonemes(voice, all_phonemes, syn, sr)
+    if audio is None:
+        return np.zeros(sr // 10, dtype=np.float32), sr
+    return _clarify_like_silero(_ensure_mono(audio), sr), sr
 
 
 def synthesize(text, speaker_id=None, onnx_path=None, sample_rate=22050):
