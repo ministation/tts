@@ -436,13 +436,18 @@ def _keep_original_yo(original, processed):
 
 
 def plain_text_for_piper(text_content, put_yo=False):
-    """Текст для Piper: без символов, которые espeak читает вслух (+, /, -, _)."""
+    """Текст для Piper: только буквы/цифры — иначе espeak читает символы вслух."""
     if not text_content:
         return ""
-    # put_yo зарезервирован для совместимости API
     text = str(text_content)
-    # +, /, \, -, тире, подчёркивание — иначе «плюс», «косая черта», «прочерк»
-    text = re.sub(r"[+/\\_\u2010-\u2015\u2212\-]+", " ", text)
+    # markup / скобки целиком
+    text = re.sub(r"\[[^\]]*\]", " ", text)
+    text = re.sub(r"\{[^}]*\}", " ", text)
+    text = re.sub(r"<[^>]*>", " ", text)
+    # всё, что не буква и не цифра → пробел (знаки препинания, стыки, *, /, — и т.д.)
+    text = re.sub(r"[^\w\s]+", " ", text, flags=re.UNICODE)
+    # убираем «одиночные» подчёркивания и т.п., которые \w ещё считает буквами
+    text = text.replace("_", " ")
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
