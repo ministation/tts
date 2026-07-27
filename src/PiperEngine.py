@@ -3,6 +3,7 @@ Piper ONNX runtime — быстрый синтез на CPU.
 """
 import io
 import os
+import re
 import threading
 
 import numpy as np
@@ -44,13 +45,33 @@ _CLARITY = float(os.environ.get("PIPER_CLARITY", "1.0"))  # 0=выкл, 1=как
 
 # Р/Л — сонанты, VITS их часто «съедает»
 _LIQUIDS = frozenset({"r", "ɾ", "ɹ", "ʀ", "ʁ", "l", "ɭ", "ɫ", "ʎ", "ɺ", "ɻ"})
-_LIQUID_MAP = {
-    "ɭ": "l",  # ретрофлексный L у espeak звучит мутно в Piper
-    "ɫ": "l",
-    "ʎ": "l",
-    "ɹ": "r",
-    "ɾ": "r",
+
+# Согласные, которые ь смягчает → возможные IPA-фонемы espeak
+_SOFT_SIGN_CONSONANTS = {
+    "б": frozenset({"b"}),
+    "в": frozenset({"v", "ʋ"}),
+    "г": frozenset({"ɡ", "g", "ɣ"}),
+    "д": frozenset({"d", "ɖ"}),
+    "ж": frozenset({"ʒ", "ʐ"}),
+    "з": frozenset({"z"}),
+    "к": frozenset({"k"}),
+    "л": frozenset({"l", "ɭ", "ɫ", "ʎ"}),
+    "м": frozenset({"m"}),
+    "н": frozenset({"n", "ɲ", "ŋ"}),
+    "п": frozenset({"p"}),
+    "р": frozenset({"r", "ɾ", "ɹ"}),
+    "с": frozenset({"s", "ʂ"}),
+    "т": frozenset({"t", "ʈ"}),
+    "ф": frozenset({"f"}),
+    "х": frozenset({"x", "h", "χ"}),
+    "ч": frozenset({"ʃ", "tʃ", "t", "ɕ"}),
+    "ш": frozenset({"ʃ", "ʂ"}),
+    "щ": frozenset({"ɕ", "ʃ"}),
 }
+_SOFT_SIGN_RE = re.compile(
+    r"([бвгджзклмнпрстфхчшщ])ь",
+    re.IGNORECASE,
+)
 
 
 def is_piper_available():
@@ -106,17 +127,113 @@ def _filter_phonemes(phonemes):
     return [p for p in phonemes if p and p not in _SKIP_PHONEMES]
 
 
-def _reinforce_liquids(phonemes):
-    """Делает Р/Л заметнее: нормализует аллофоны и слегка удлиняет."""
-    out = []
-    for i, p in enumerate(phonemes):
-        p = _LIQUID_MAP.get(p, p)
-        out.append(p)
-        if p in ("r", "l") or p in _LIQUIDS:
-            nxt = phonemes[i + 1] if i + 1 < len(phonemes) else None
-            if nxt != "ː":
-                out.append("ː")
+def _apply_soft_sign(word, phonemes):
+    """
+    Мягкий знак смягчает согласную перед ним: в фонемы добавляем ʲ,
+    если espeak его потерял (конь, боль→ɭ без ʲ и т.п.).
+    """
+    if not word or not phonemes:
+        return list(phonemes)
+    w = word.lower().replace("ё", "е")
+    if "ь" not in w:
+        return list(phonemes)
+
+    out = list(phonemes)
+    # с конца слова — последние смягчения важнее для совпадения с хвостом фонем
+    matches = list(_SOFT_SIGN_RE.finditer(w))
+    for m in reversed(matches):
+        cyr = m.group(1).lower()
+        targets = _SOFT_SIGN_CONSONANTS.get(cyr)
+        if not targets:
+            continue
+        for j in range(len(out) - 1, -1, -1):
+            p = out[j]
+            if p in targets or (cyr == "л" and p in _LIQUIDS and p != "r"):
+                # уже смягчено
+                if j + 1 < len(out) and out[j + 1] == "ʲ":
+                    break
+                # ʲ не ставим на ударение/долготу — сдвигаем после служебных
+                k = j + 1
+                while k < len(out) and out[k] in ("ˈ", "ˌ", "ː"):
+                    k += 1
+                if k < len(out) and out[k] == "ʲ":
+                    break
+                out.insert(k, "ʲ")
+                break
     return out
+
+
+def _reinforce_liquids(phonemes):
+    """
+    Р/Л заметнее: ɭ/ɫ → l, сохраняя ʲ (мягкость от ь), плюс лёгкое удлинение.
+    """
+    out = []
+    i = 0
+    n = len(phonemes)
+    while i < n:
+        p = phonemes[i]
+        nxt = phonemes[i + 1] if i + 1 < n else None
+
+        if p in ("ɭ", "ɫ", "ʎ", "ɺ", "ɻ"):
+            out.append("l")
+            if p == "ʎ" or nxt == "ʲ":
+                if nxt == "ʲ":
+                    out.append("ʲ")
+                    i += 2
+                else:
+                    out.append("ʲ")
+                    i += 1
+            else:
+                i += 1
+            if i >= n or phonemes[min(i, n - 1)] != "ː":
+                # удлинение после возможного ʲ
+                if not out or out[-1] != "ː":
+                    out.append("ː")
+            continue
+
+        if p in ("ɹ", "ɾ"):
+            p = "r"
+
+        if p == "r":
+            out.append("r")
+            if nxt == "ʲ":
+                out.append("ʲ")
+                i += 2
+            else:
+                i += 1
+            if not out or out[-1] != "ː":
+                out.append("ː")
+            continue
+
+        if p == "l":
+            out.append("l")
+            if nxt == "ʲ":
+                out.append("ʲ")
+                i += 2
+            else:
+                i += 1
+            if not out or out[-1] != "ː":
+                out.append("ː")
+            continue
+
+        out.append(p)
+        i += 1
+    return out
+
+
+def _phonemes_for_word(voice, word):
+    if not word or re.fullmatch(r"[ъьЪЬ]+", word):
+        return []
+    sentences = voice.phonemize(word) or []
+    merged = []
+    for sentence in sentences:
+        ph = _filter_phonemes(sentence)
+        if not ph or _is_sign_letter_name(ph):
+            continue
+        ph = _apply_soft_sign(word, ph)
+        ph = _reinforce_liquids(ph)
+        merged.extend(ph)
+    return merged
 
 
 def _ensure_mono(audio):
@@ -215,23 +332,26 @@ def _audio_from_phonemes(voice, phonemes, syn_config, sr):
 
 def _synthesize_from_phonemes(voice, text):
     """
-    Один непрерывный пассаж (без нарезки по словам — иначе «заикание»).
-    Пробелы/пунктуация из фонем убраны; clarify один раз на весь клип.
+    Непрерывный синтез одной дорожкой.
+    По словам только считаем фонемы (чтобы ь смягчал согласные), аудио — одним куском.
     """
     sr = int(getattr(getattr(voice, "config", None), "sample_rate", None) or 22050)
     syn = _syn_config()
 
     all_phonemes = []
-    for sentence in voice.phonemize(text) or []:
-        filtered = _reinforce_liquids(_filter_phonemes(sentence))
-        if not filtered or _is_sign_letter_name(filtered):
-            continue
-        all_phonemes.extend(filtered)
+    for word in re.split(r"\s+", text.strip()):
+        all_phonemes.extend(_phonemes_for_word(voice, word))
+
+    if not all_phonemes:
+        # запасной путь — целая фраза
+        for sentence in voice.phonemize(text) or []:
+            ph = _reinforce_liquids(_apply_soft_sign(text, _filter_phonemes(sentence)))
+            if ph and not _is_sign_letter_name(ph):
+                all_phonemes.extend(ph)
 
     if not all_phonemes:
         return np.zeros(sr // 10, dtype=np.float32), sr
 
-    # уже усилены liquids выше — не применять reinforce дважды
     ids = voice.phonemes_to_ids(all_phonemes)
     audio = voice.phoneme_ids_to_audio(ids, syn_config=syn)
     if isinstance(audio, tuple):
